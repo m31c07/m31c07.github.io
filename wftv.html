@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Выбор устройства</title>
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif; transition: background-color 0.3s; }
+        .red { background-color: red; color: white; }
+        .blue { background-color: blue; color: white; }
+        #message { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div id="deviceSelection">
+        <h2>Выберите устройство</h2>
+        <button onclick="selectDevice('red')">Красное устройство</button>
+        <button onclick="selectDevice('blue')">Синее устройство</button>
+    </div>
+
+    <div id="message"></div>
+
+    <script>
+        const SHEET_ID = '14o1edFo9-_PJKYMoka01dFFi6brrx9aTWaY8heB6GMc'; // Заменено на новый идентификатор таблицы
+        const SHEET_NAME = 'WF-tv1'; // Замените на имя вашего листа, если необходимо
+
+        function selectDevice(color) {
+            document.body.className = color; // Изменяем фон
+            fetchSheetData(color);
+        }
+
+        async function fetchSheetData(color) {
+            const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+            try {
+                const response = await fetch(url);
+                const data = await response.text();
+                const jsonData = JSON.parse(data.substr(47).slice(0, -2)); // Убираем лишние данные
+                const rows = jsonData.table.rows;
+                
+                let message = '';
+                for (const row of rows) {
+                    const cellValue = row.c[0] && row.c[0].v; // Получаем значение ячейки
+                    if (cellValue && cellValue.toLowerCase() === color) {
+                        message = row.c[1] && row.c[1].v; // Получаем сообщение
+                        break;
+                    }
+                }
+                document.getElementById('message').textContent = message ? message : 'Нет данных для данного цвета.';
+            } catch (error) {
+                console.error('Ошибка при получении данных:', error);
+            }
+        }
+    </script>
+</body>
+</html>
