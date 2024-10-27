@@ -43,13 +43,15 @@
     <script>
         const SHEET_ID = '14o1edFo9-_PJKYMoka01dFFi6brrx9aTWaY8heB6GMc'; // Идентификатор таблицы
         const SHEET_NAME = 'Sheet1'; // Имя листа, где находятся данные
+        let currentColor = ''; // Переменная для хранения текущего выбранного цвета
 
         function selectDevice(color) {
+            currentColor = color; // Сохраняем выбранный цвет
             document.body.className = color; // Изменяем фон
-            fetchSheetData(color);
+            fetchSheetData(); // Загружаем данные сразу после выбора устройства
         }
 
-        async function fetchSheetData(color) {
+        async function fetchSheetData() {
             const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
             try {
                 const response = await fetch(url);
@@ -61,7 +63,7 @@
                 let imageUrl = '';
                 for (const row of rows) {
                     const cellValue = row.c[0] && row.c[0].v; // Получаем значение ячейки
-                    if (cellValue && cellValue.toLowerCase() === color) {
+                    if (cellValue && cellValue.toLowerCase() === currentColor) {
                         message = row.c[1] && row.c[1].v; // Получаем сообщение
                         imageUrl = row.c[2] && row.c[2].v; // Получаем URL изображения (предполагается, что это третья колонка)
                         break;
@@ -80,6 +82,14 @@
                 console.error('Ошибка при получении данных:', error);
             }
         }
+
+        // Запускаем проверку каждую секунду, если устройство выбрано
+        setInterval(() => {
+            if (currentColor) {
+                fetchSheetData();
+            }
+        }, 1000); // 1000 мс = 1 секунда
+
     </script>
 </body>
 </html>
