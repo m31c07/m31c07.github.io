@@ -1,4 +1,4 @@
-const size = 5;
+const size = 4;
 const INIT_CELL_VAL = 4
 let MIN_START_VALUE = INIT_CELL_VAL; // Используем let вместо const
 let MAX_START_VALUE = INIT_CELL_VAL; // Используем let вместо const
