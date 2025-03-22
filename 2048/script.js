@@ -1,5 +1,5 @@
-const size = 4;
-const INIT_CELL_VAL = 4
+const size = 5;
+const INIT_CELL_VAL = 64;
 let MIN_START_VALUE = INIT_CELL_VAL; // Используем let вместо const
 let MAX_START_VALUE = INIT_CELL_VAL; // Используем let вместо const
 const STARTING_CELLS = 1;
@@ -8,7 +8,6 @@ const MIN_SPLIT_VALUE = 4;
 const REMOVE_PROBABILITIES = [1, 1]; 
 
 const REMOVE_WEIGHTS = {
-    // 2: 100,   4: 50,   8: 10,   16: 1,   32: 0.1,   64: 0.001
     2: 100,   4: 50,   8: 10,   16: 1
 };
 
@@ -18,7 +17,19 @@ let selectedCell = null;
 let cellsToDelete = [];
 let gameInProgress = true; // Флаг для отслеживания текущей игры
 
+let disabledCells = [
+    // { x: 0, y: 0 },{ x: 0, y: 1 },{ x: 0, y: 2 },{ x: 0, y: 3 },{ x: 0, y: 4 },{ x: 0, y: 5 },
+    // { x: 1, y: 0 },                                                            { x: 1, y: 5 },
+    // { x: 2, y: 0 },                                                            { x: 2, y: 5 },
+    // { x: 3, y: 0 },                                                            { x: 3, y: 5 },
+    // { x: 4, y: 0 },                                                            { x: 4, y: 5 },
+    // { x: 5, y: 0 },{ x: 5, y: 1 },{ x: 5, y: 2 },{ x: 5, y: 3 },{ x: 5, y: 4 },{ x: 5, y: 5 },
+
+]
+
 let stagesCompleted = 0; // Добавляем переменную для отслеживания этапов
+
+let isKeyCooldown = false; // Флаг для отслеживания задержки
 
 let animationQueue = {
     move: null, // Параметры для анимации перемещения
@@ -85,20 +96,6 @@ function getRandomValue() {
     return 2 ** randomPower;
 }
 
-// function initializeGrid() {
-    // updateGridStyle();
-    // let filledCells = 0;
-    // while (filledCells < STARTING_CELLS) {
-        // let x = Math.floor(Math.random() * size);
-        // let y = Math.floor(Math.random() * size);
-        // if (grid[x][y] === null) {
-            // grid[x][y] = getRandomValue();
-            // filledCells++;
-        // }
-    // }
-    // selectRandomCell();
-    // renderGrid();
-// }
 function initializeGrid() {
     updateGridStyle();
     updateStagesDisplay(); // Обновляем отображение этапов
@@ -107,7 +104,7 @@ function initializeGrid() {
     while (filledCells < STARTING_CELLS) {
         let x = Math.floor(Math.random() * size);
         let y = Math.floor(Math.random() * size);
-        if (grid[x][y] === null) {
+        if (grid[x][y] === null && !disabledCells.some(cell => cell.x === x && cell.y === y)) {
             grid[x][y] = getRandomValue();
             filledCells++;
         }
@@ -131,10 +128,10 @@ function selectRandomCell() {
 
 function hasEmptyNeighbor(x, y) {
     return (
-        (x > 0 && grid[x - 1][y] === null) ||
-        (x < size - 1 && grid[x + 1][y] === null) ||
-        (y > 0 && grid[x][y - 1] === null) ||
-        (y < size - 1 && grid[x][y + 1] === null)
+        (x > 0 && grid[x - 1][y] === null && !disabledCells.some(cell => cell.x === x - 1 && cell.y === y)) ||
+        (x < size - 1 && grid[x + 1][y] === null && !disabledCells.some(cell => cell.x === x + 1 && cell.y === y)) ||
+        (y > 0 && grid[x][y - 1] === null && !disabledCells.some(cell => cell.x === x && cell.y === y - 1)) ||
+        (y < size - 1 && grid[x][y + 1] === null && !disabledCells.some(cell => cell.x === x && cell.y === y + 1))
     );
 }
 
@@ -144,7 +141,7 @@ function getAvailableCells() {
         for (let y = 0; y < size; y++) {
             if (grid[x][y] !== null &&
                 !cellsToDelete.some(cell => cell.x === x && cell.y === y) &&
-                hasEmptyNeighbor(x, y)) {
+                hasEmptyNeighbor(x, y) ) {
                 available.push({ x, y });
             }
         }
@@ -152,33 +149,9 @@ function getAvailableCells() {
     return available;
 }
 
-// function isGameOver() {
-    // if (!selectedCell) return true;
-
-    // for (let x = 0; x < size; x++) {
-        // for (let y = 0; y < size; y++) {
-            // if (grid[x][y] !== null && grid[x][y] >= MIN_SPLIT_VALUE && hasEmptyNeighbor(x, y)) {
-                // return false;
-            // }
-        // }
-    // }
-    // return true;
-// }
 function isGameOver() {
     // Проверяем, если нет выделенной клетки, то продолжаем логику завершения игры
     if (!selectedCell) {
-        // Проходим по всем клеткам на поле
-        for (let x = 0; x < size; x++) {
-            for (let y = 0; y < size; y++) {
-                const value = grid[x][y];
-                // Проверяем, что клетка не равна null, не равна 2 и не помечена на удаление
-                if (value !== null && value !== 2 && cellsToDelete.some(cell => cell.x === x && cell.y === y)) {
-                    // Если такая клетка найдена, игра не завершена
-                    return false;
-                }
-            }
-        }
-        // Если таких клеток нет, игра завершена
         return true;
     }
     // Если выделенная клетка есть, то возвращаем false (игра продолжается)
@@ -301,6 +274,7 @@ function move(direction) {
         newY >= 0 && newY < size && 
         grid[newX][newY] === null && // Клетка должна быть пустой
         !cellsToDelete.some(cell => cell.x === newX && cell.y === newY) && // Клетка не должна быть помечена на удаление
+        !disabledCells.some(cell => cell.x === newX && cell.y === newY) && // Клетка не должна быть помечена на удаление
         value >= MIN_SPLIT_VALUE
     ) {
         let newValue = value / 2;
@@ -356,9 +330,6 @@ function animateCell() {
         const movingCell = cellElement.cloneNode(true);
         movingCell.classList.add("moving"); // Добавляем класс для анимации
 
-        // Устанавливаем позицию дубликата поверх оригинальной клетки
-        // const gridElement = document.getElementById("grid");
-        // const gridRect = gridElement.getBoundingClientRect();
         movingCell.style.position = "absolute";
         movingCell.style.left = `${gridRect.left + oldY * 85}px`; // Смещение по X (колонка) + смещение сетки
         movingCell.style.top = `${gridRect.top + oldX * 85}px`;  // Смещение по Y (строка) + смещение сетки
@@ -397,13 +368,6 @@ function animateCell() {
             emptyCell.classList.remove("filled"); // Убираем класс filled, чтобы копия выглядела как пустая ячейка
             emptyCell.classList.add("cell");   // Добавляем класс для анимации удаления
 
-            // Устанавливаем позицию копии под удаляемой клеткой
-            // const gridElement = document.getElementById("grid");
-            // const gridRect = gridElement.getBoundingClientRect();
-            
-            // const x = cellElement.x; // Координата X (строка)
-            // const y = cellElement.y; // Координата Y (колонка)
-            // console.log('x:', x, ' y:', y);я
             console.log(cellElement);
             emptyCell.style.position = "absolute";
             emptyCell.style.left = `${gridRect.left + y * 85}px`; // Смещение по X (колонка) + смещение сетки
@@ -434,33 +398,6 @@ function animateCell() {
     }
 }
 
-// function animateMove(oldX, oldY, newX, newY) {
-    // const gridElement = document.getElementById("grid");
-    // if (!gridElement) return;
-
-    // const cells = gridElement.querySelectorAll(".cell");
-    // const oldCell = cells[oldX * size + oldY];
-    // const movingCell = oldCell.cloneNode(true);
-    // movingCell.classList.add("moving");
-
-    // gridElement.appendChild(movingCell);
-    // const gridRect = gridElement.getBoundingClientRect();
-
-    // movingCell.style.position = "absolute";
-    // movingCell.style.left = `${gridRect.left + oldY * 85}px`;
-    // movingCell.style.top = `${gridRect.top + oldX * 85}px`;
-
-    // setTimeout(() => {
-        // movingCell.style.transition = "transform 0.3s ease";
-        // movingCell.style.transform = `translate(${(newY - oldY) * 85}px, ${(newX - oldX) * 85}px)`;
-    // }, 10);
-
-    // setTimeout(() => {
-        // movingCell.remove();
-        // renderGrid();
-    // }, 300);
-// }
-
 function renderGrid() {
     const gridElement = document.getElementById("grid");
     if (!gridElement) return;
@@ -470,7 +407,15 @@ function renderGrid() {
     for (let x = 0; x < size; x++) {
         for (let y = 0; y < size; y++) {
             const cell = document.createElement("div");
-            cell.classList.add("cell");
+            
+            
+            if (disabledCells.some(c => c.x === x && c.y === y)) {
+                cell.classList.add("empty");
+                // cell.classList.remove("cell");
+            }
+            // else {
+                cell.classList.add("cell");
+            // }
 
             if (cellsToDelete.some(c => c.x === x && c.y === y)) {
                 cell.classList.add("to-remove");
@@ -485,122 +430,13 @@ function renderGrid() {
                 }
             }
 
+
             gridElement.appendChild(cell);
         }
     }
 
-    // if (isGameOver()) showGameOver();
 }
-/* 
-function showGameOver() {
-    let hasOtherValues = false;
 
-    // Проверяем, есть ли на поле клетки, кроме двоек
-    for (let x = 0; x < size; x++) {
-        for (let y = 0; y < size; y++) {
-            if (grid[x][y] !== null && grid[x][y] !== 2) {
-                hasOtherValues = true;
-                break;
-            }
-        }
-        if (hasOtherValues) break;
-    }
-
-    // Удаляем все двойки с поля
-    for (let x = 0; x < size; x++) {
-        for (let y = 0; y < size; y++) {
-            if (grid[x][y] === 2) {
-                cellsToDelete.push({ x, y });
-            }
-        }
-    }
-
-    if (cellsToDelete.length > 0) {
-        deleteMarkedCells();
-    }
-
-    // Показываем сообщение о завершении игры
-    setTimeout(() => {
-        const gameOverOverlay = document.getElementById('game-over-overlay');
-        const gameOverMessage = document.getElementById('game-over-message');
-        if (gameOverOverlay && gameOverMessage) {
-            if (hasOtherValues) {
-                gameOverMessage.textContent = 'Поражение, начать сначала';
-                MIN_START_VALUE = INIT_CELL_VAL;
-                MAX_START_VALUE = INIT_CELL_VAL;
-                stagesCompleted = 0; // Сбрасываем счетчик
-            } else {
-                MIN_START_VALUE *= 2;
-                MAX_START_VALUE *= 2;
-                stagesCompleted++;
-                gameOverMessage.textContent = `Победа, следующий противник! Этап: ${stagesCompleted}`;
-                updateStagesDisplay(); // Обновляем отображение этапов
-            }
-            gameOverOverlay.style.display = 'flex'; // Показываем overlay
-        }
-    }, 500);
-
-    // Добавляем обработчик для кнопки рестарта
-    const restartButton = document.getElementById('restart-button');
-    if (restartButton) restartButton.addEventListener('click', restartGame);
-} */
-/* 
-function showGameOver() {
-    let hasOtherValues = false;
-
-    // Проверяем, есть ли на поле клетки, кроме двоек и клеток, помеченных для удаления
-    for (let x = 0; x < size; x++) {
-        for (let y = 0; y < size; y++) {
-            // Проверяем, что клетка не помечена для удаления и не равна 2
-            if (grid[x][y] !== null && grid[x][y] !== 2 && !cellsToDelete.some(cell => cell.x === x && cell.y === y)) {
-                hasOtherValues = true;
-                break;
-            }
-        }
-        if (hasOtherValues) break;
-    }
-
-    // Помечаем клетки для удаления, если их значение 2
-    cellsToDelete = []; // Сбросим список клеток для удаления
-    for (let x = 0; x < size; x++) {
-        for (let y = 0; y < size; y++) {
-            if (grid[x][y] === 2) {
-                cellsToDelete.push({ x, y });
-            }
-        }
-    }
-
-    // Удаляем помеченные клетки, если такие есть
-    if (cellsToDelete.length > 0) {
-        deleteMarkedCells();
-    }
-
-    // Показываем сообщение о завершении игры
-    setTimeout(() => {
-        const gameOverOverlay = document.getElementById('game-over-overlay');
-        const gameOverMessage = document.getElementById('game-over-message');
-        if (gameOverOverlay && gameOverMessage) {
-            if (hasOtherValues) {
-                gameOverMessage.textContent = 'Поражение, начать сначала';
-                MIN_START_VALUE = INIT_CELL_VAL;
-                MAX_START_VALUE = INIT_CELL_VAL;
-                stagesCompleted = 0; // Сбрасываем счетчик
-            } else {
-                MIN_START_VALUE *= 2;
-                MAX_START_VALUE *= 2;
-                stagesCompleted++;
-                gameOverMessage.textContent = `Победа, следующий противник! Этап: ${stagesCompleted}`;
-                updateStagesDisplay(); // Обновляем отображение этапов
-            }
-            gameOverOverlay.style.display = 'flex'; // Показываем overlay
-        }
-    }, 500);
-
-    // Добавляем обработчик для кнопки рестарта
-    const restartButton = document.getElementById('restart-button');
-    if (restartButton) restartButton.addEventListener('click', restartGame);
-}
- */
 function showGameOver() {
     if (!gameInProgress) return; // Если игра уже завершена, выходим
     let hasOtherValues = false;
@@ -610,6 +446,7 @@ function showGameOver() {
         for (let y = 0; y < size; y++) {
             // Проверяем, что клетка не равна 2 и не пуста и не помечена на удаление
             if (grid[x][y] !== null && grid[x][y] !== 2 && !cellsToDelete.some(cell => cell.x === x && cell.y === y) ) {
+            // if (grid[x][y] !== null && grid[x][y] !== 2  ) {
                 hasOtherValues = true;
                 break;
             }
@@ -620,10 +457,11 @@ function showGameOver() {
     // Если есть другие значения, то проигрыш
     if (!hasOtherValues) {
         // Выигрыш - помечаем клетки с 2 для удаления
-        cellsToDelete = []; // Сбросим список клеток для удаления
+        // cellsToDelete = []; // Сбросим список клеток для удаления
         for (let x = 0; x < size; x++) {
             for (let y = 0; y < size; y++) {
-                if (grid[x][y] === 2 || cellsToDelete.some(cell => cell.x === x && cell.y === y)) {
+                if (grid[x][y] === 2 ) {
+                // if (grid[x][y] === 2 ) {
                     cellsToDelete.push({ x, y });
                 }
             }
@@ -682,17 +520,32 @@ function restartGame() {
 
 document.addEventListener("keydown", (event) => {
     const gameOverOverlay = document.getElementById('game-over-overlay');
+
+    // Если задержка активна, игнорируем нажатие
+    if (isKeyCooldown) return;
+
+    // Обработка стрелок
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
         move(event.key);
+        startCooldown(); // Запускаем задержку
     }
-        // Проверяем, виден ли overlay (игра завершена)
+
+    // Обработка Enter или Пробела, если игра завершена
     if (gameOverOverlay && gameOverOverlay.style.display === 'flex') {
-        // Если нажата клавиша Enter (код 13) или Пробел (код 32)
         if (event.key === "Enter" || event.key === " ") {
             restartGame(); // Перезапускаем игру
+            startCooldown(); // Запускаем задержку
         }
     }
 });
 
+
+// Функция для запуска задержки
+function startCooldown() {
+    isKeyCooldown = true; // Блокируем обработку новых нажатий
+    setTimeout(() => {
+        isKeyCooldown = false; // Разблокируем обработку через 300 мс
+    }, 300); // Задержка в миллисекундах (можно изменить)
+}
 
 initializeGrid();
