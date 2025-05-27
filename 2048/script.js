@@ -1,5 +1,5 @@
 const size = 5;
-const INIT_CELL_VAL = 64;
+const INIT_CELL_VAL = 512;
 let MIN_START_VALUE = INIT_CELL_VAL; // Используем let вместо const
 let MAX_START_VALUE = INIT_CELL_VAL; // Используем let вместо const
 const STARTING_CELLS = 1;
@@ -7,9 +7,7 @@ const MIN_SPLIT_VALUE = 4;
 
 const REMOVE_PROBABILITIES = [1, 1]; 
 
-const REMOVE_WEIGHTS = {
-    2: 100,   4: 50,   8: 10,   16: 1
-};
+const REMOVE_WEIGHTS = {    2:  100,    4:  100,    8:  10,    16: 5,    32: 2,    64: 1};
 
 // const grid = Array.from({ length: size }, () => Array(size).fill(null));
 let grid = Array.from({ length: size }, () => Array(size).fill(null)); // Создаем пустую сетку
@@ -18,6 +16,9 @@ let cellsToDelete = [];
 let gameInProgress = true; // Флаг для отслеживания текущей игры
 
 let disabledCells = [
+    { x: 0, y: 2 },{ x: 2, y: 0 },{ x: 2, y: 4 },{ x: 4, y: 2 },
+    // { x: 2, y: 2 },
+    // { x: 4, y: 0 },{ x: 4, y: 4 },
     // { x: 0, y: 0 },{ x: 0, y: 1 },{ x: 0, y: 2 },{ x: 0, y: 3 },{ x: 0, y: 4 },{ x: 0, y: 5 },
     // { x: 1, y: 0 },                                                            { x: 1, y: 5 },
     // { x: 2, y: 0 },                                                            { x: 2, y: 5 },
@@ -122,8 +123,28 @@ function updateStagesDisplay() {
 
 
 function selectRandomCell() {
-    let availableCells = getAvailableCells().filter(cell => grid[cell.x][cell.y] >= MIN_SPLIT_VALUE);
-    selectedCell = availableCells.length > 0 ? availableCells[Math.floor(Math.random() * availableCells.length)] : null;
+    // 1. Получаем все доступные клетки (уже без проверки на cellsToDelete)
+    let availableCells = getAvailableCells().filter(cell => 
+        grid[cell.x][cell.y] >= MIN_SPLIT_VALUE
+    );
+
+    // 2. Если есть подходящие клетки
+    if (availableCells.length > 0) {
+        // Выбираем случайную клетку
+        const randomIndex = Math.floor(Math.random() * availableCells.length);
+        selectedCell = availableCells[randomIndex];
+        
+        // 3. Удаляем выбранную клетку из cellsToDelete (если она там была)
+        cellsToDelete = cellsToDelete.filter(cell => 
+            !(cell.x === selectedCell.x && cell.y === selectedCell.y)
+        );
+        
+        return selectedCell;
+    }
+    
+    // 4. Если нет доступных клеток
+    selectedCell = null;
+    return null;
 }
 
 function hasEmptyNeighbor(x, y) {
@@ -140,7 +161,7 @@ function getAvailableCells() {
     for (let x = 0; x < size; x++) {
         for (let y = 0; y < size; y++) {
             if (grid[x][y] !== null &&
-                !cellsToDelete.some(cell => cell.x === x && cell.y === y) &&
+                // !cellsToDelete.some(cell => cell.x === x && cell.y === y) &&
                 hasEmptyNeighbor(x, y) ) {
                 available.push({ x, y });
             }
@@ -159,7 +180,7 @@ function isGameOver() {
 }
 
 
-function removeCellsBasedOnWeights() {
+/* function removeCellsBasedOnWeights() {
 
     // Функция для выбора числа на основе весов
     function getRandomNumberBasedOnWeights() {
@@ -227,9 +248,168 @@ function removeCellsBasedOnWeights() {
             }
         }
     }
+} */
+/* function removeCellsBasedOnWeights() {
+    // 1. Разделяем числа на "приоритетные" (вес >= 100) и "взвешенные" (вес < 100)
+    const priorityNumbers = [];
+    const weightedNumbers = [];
+    let totalWeight = 0;
+    
+    for (let number in REMOVE_WEIGHTS) {
+        const num = parseInt(number);
+        const weight = REMOVE_WEIGHTS[number];
+        
+        if (weight >= 100) {
+            priorityNumbers.push(num);
+        } else {
+            weightedNumbers.push(num);
+            totalWeight += weight;
+        }
+    }
+
+    // 2. Для каждого слота выбираем число и ищем клетку
+    for (let slot = 0; slot < REMOVE_PROBABILITIES.length; slot++) {
+        let selectedNumber;
+        let found = false;
+
+        // 2a. Сначала пробуем выбрать из взвешенных чисел (вес < 100)
+        if (weightedNumbers.length > 0 && totalWeight > 0) {
+            const randomWeight = Math.random() * totalWeight;
+            let cumulativeWeight = 0;
+            
+            for (let number of weightedNumbers) {
+                cumulativeWeight += REMOVE_WEIGHTS[number];
+                if (randomWeight <= cumulativeWeight) {
+                    selectedNumber = number;
+                    break;
+                }
+            }
+
+            // Ищем клетки с выбранным числом
+            const availableCells = [];
+            for (let x = 0; x < size; x++) {
+                for (let y = 0; y < size; y++) {
+                    if (grid[x][y] === selectedNumber && 
+                        !cellsToDelete.some(c => c.x === x && c.y === y)) {
+                        availableCells.push({ x, y });
+                    }
+                }
+            }
+
+            if (availableCells.length > 0) {
+                const randomCell = availableCells[Math.floor(Math.random() * availableCells.length)];
+                cellsToDelete.push(randomCell);
+                found = true;
+            }
+        }
+
+        // 2b. Если не нашли среди взвешенных или их нет, ищем среди приоритетных
+        if (!found && priorityNumbers.length > 0) {
+            // Собираем все доступные приоритетные клетки
+            const allPriorityCells = [];
+            for (let x = 0; x < size; x++) {
+                for (let y = 0; y < size; y++) {
+                    if (priorityNumbers.includes(grid[x][y]) && 
+                        !cellsToDelete.some(c => c.x === x && c.y === y)) {
+                        allPriorityCells.push({ x, y });
+                    }
+                }
+            }
+
+            // Если есть приоритетные клетки, выбираем случайную
+            if (allPriorityCells.length > 0) {
+                const randomCell = allPriorityCells[Math.floor(Math.random() * allPriorityCells.length)];
+                cellsToDelete.push(randomCell);
+                found = true;
+            }
+        }
+
+        // 2c. Если вообще ничего не нашли (маловероятно), пропускаем слот
+    }
+} */
+function removeCellsBasedOnWeights() {
+    // 1. Разделяем числа на две группы:
+    const guaranteedNumbers = [];  // числа с 100% вероятностью
+    const percentageNumbers = [];  // числа с процентным распределением
+    let totalPercentage = 0;
+
+    for (let number in REMOVE_WEIGHTS) {
+        const num = parseInt(number);
+        const percentage = REMOVE_WEIGHTS[number];
+
+        if (percentage === 100) {
+            guaranteedNumbers.push(num);
+        } else if (percentage > 0) {
+            percentageNumbers.push({
+                number: num,
+                percentage: percentage
+            });
+            totalPercentage += percentage;
+        }
+    }
+
+    // 2. Для каждого слота выбираем число и ищем клетку
+    for (let slot = 0; slot < REMOVE_PROBABILITIES.length; slot++) {
+        let found = false;
+
+        // 2a. Сначала пробуем выбрать из процентных чисел (если есть и общий процент > 0)
+        if (percentageNumbers.length > 0 && totalPercentage > 0) {
+            const randomPercent = Math.random() * totalPercentage;
+            let accumulated = 0;
+            let selectedNumber = null;
+
+            for (let item of percentageNumbers) {
+                accumulated += item.percentage;
+                if (randomPercent <= accumulated) {
+                    selectedNumber = item.number;
+                    break;
+                }
+            }
+
+            // Ищем клетки с выбранным числом
+            if (selectedNumber !== null) {
+                const availableCells = [];
+                for (let x = 0; x < size; x++) {
+                    for (let y = 0; y < size; y++) {
+                        if (grid[x][y] === selectedNumber && 
+                            !cellsToDelete.some(c => c.x === x && c.y === y)) {
+                            availableCells.push({ x, y });
+                        }
+                    }
+                }
+
+                if (availableCells.length > 0) {
+                    const randomCell = availableCells[Math.floor(Math.random() * availableCells.length)];
+                    cellsToDelete.push(randomCell);
+                    found = true;
+                }
+            }
+        }
+
+        // 2b. Если не нашли среди процентных, ищем среди гарантированных (100%)
+        if (!found && guaranteedNumbers.length > 0) {
+            // Собираем все доступные клетки с гарантированными числами
+            const allGuaranteedCells = [];
+            for (let x = 0; x < size; x++) {
+                for (let y = 0; y < size; y++) {
+                    if (guaranteedNumbers.includes(grid[x][y]) && 
+                        !cellsToDelete.some(c => c.x === x && c.y === y)) {
+                        allGuaranteedCells.push({ x, y });
+                    }
+                }
+            }
+
+            // Если есть гарантированные клетки, выбираем случайную
+            if (allGuaranteedCells.length > 0) {
+                const randomCell = allGuaranteedCells[Math.floor(Math.random() * allGuaranteedCells.length)];
+                cellsToDelete.push(randomCell);
+                found = true;
+            }
+        }
+
+        // 2c. Если вообще ничего не нашли, пропускаем слот
+    }
 }
-
-
 
 function deleteMarkedCells() {
     cellsToDelete.forEach(cell => {
@@ -480,8 +660,8 @@ function showGameOver() {
         if (gameOverOverlay && gameOverMessage) {
             if (hasOtherValues) {
                 gameOverMessage.textContent = 'Поражение, начать сначала';
-                MIN_START_VALUE = INIT_CELL_VAL;
-                MAX_START_VALUE = INIT_CELL_VAL;
+                MIN_START_VALUE = MIN_START_VALUE;
+                MAX_START_VALUE = MAX_START_VALUE;
                 stagesCompleted = 0; // Сбрасываем счетчик
             } else {
                 MIN_START_VALUE *= 2;
