@@ -183,8 +183,8 @@
             const gameHeight = 500 + 100; // 100 - примерная высота заголовка
             
             // Вычисляем масштаб
-            const scaleX = (windowWidth * 0.9) / gameWidth;
-            const scaleY = (windowHeight * 0.9) / gameHeight;
+            const scaleX = (windowWidth * 1) / gameWidth;
+            const scaleY = (windowHeight * 1) / gameHeight;
             const scale = Math.min(scaleX, scaleY, 1); // Не увеличиваем больше 100%
             
             container.style.transform = `scale(${scale})`;
