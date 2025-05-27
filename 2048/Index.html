@@ -2,128 +2,175 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#ffcc00">
     <title>Реверсивная 2048</title>
+    <link rel="apple-touch-icon" href="icon.png">
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
             text-align: center;
+            margin: 0;
+            padding: 10px;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            touch-action: manipulation;
+            background-color: #f5f5f5;
         }
-        <!-- .grid { -->
-            <!-- display: grid; -->
-            <!-- grid-template-columns: repeat(4, 80px); -->
-            <!-- grid-template-rows: repeat(4, 80px); -->
-            <!-- gap: 5px; -->
-            <!-- margin: 20px auto; -->
-            <!-- width: max-content; -->
-        <!-- } -->
+        
+        h1 {
+            font-size: min(8vw, 36px);
+            margin-bottom: 5px;
+        }
+        
+        p {
+            font-size: min(4vw, 16px);
+            margin-top: 5px;
+            color: #666;
+        }
+        
         .grid {
             display: grid;
-            gap: 5px; /* Расстояние между клетками */
-            width: min(90vw, 400px); /* Адаптивная ширина */
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: 8px;
+            width: min(90vw, 400px);
             height: min(90vw, 400px);
             margin: 20px auto;
+            touch-action: none;
         }
-                
+        
         .cell {
-            width: 80px;
-            height: 80px;
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #ccc;
-            font-size: 24px;
+            background-color: #ddd;
+            font-size: min(8vw, 32px);
             font-weight: bold;
-            border-radius: 5px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        
         .filled {
             background-color: #ffcc00;
         }
+        
         .empty {
-            background-color: transparent;
+            background-color: #ddd;
         }
+        
         .selected {
-            background-color: #ff5733; /* Цвет выделенной клетки */
-            color: white; /* Цвет текста в выделенной клетке */
-        }
-        #game-over-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 10;
-        }
-
-        #game-over-message {
-            text-align: center;
-            color: white;
-        }
-
-        #restart-button {
-            padding: 10px 20px;
-            font-size: 18px;
             background-color: #ff5733;
             color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
         }
-
-        #restart-button:hover {
-            background-color: #e64a19;
-        }
-        .moving {
-            position: absolute;
-            z-index: 10; /* Чтобы клетка была поверх остальных */
-        }
+        
         .to-remove {
-            background-color: violet; /* Красный цвет для клеток, которые будут удалены */
+            background-color: #9b59b6;
             color: white;
         }
+        
         #game-over-overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.85);
             display: flex;
             justify-content: center;
             align-items: center;
             flex-direction: column;
             color: white;
-            font-size: 2em;
+            font-size: min(6vw, 28px);
+            z-index: 100;
+            display: none;
         }
-
+        
+        #game-over-message {
+            padding: 0 20px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
         #restart-button {
             margin-top: 20px;
-            padding: 10px 20px;
-            font-size: 1em;
+            padding: 12px 24px;
+            font-size: min(5vw, 18px);
+            background-color: #ff5733;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-
-
+        
+        #restart-button:hover {
+            background-color: #e64a19;
+        }
+        
+        /* Анимации */
+        @keyframes appear {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        
+        @keyframes merge {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
+        .new-tile {
+            animation: appear 0.2s ease-out;
+        }
+        
+        .merged-tile {
+            animation: merge 0.3s ease-out;
+        }
     </style>
 </head>
 <body>
-
     <h1>Реверсивная 2048</h1>
-    <p>Используйте стрелки для деления чисел.</p>
+    <p>Используйте стрелки для деления чисел</p>
     <div class="grid" id="grid"></div>
-    <!-- Блок для отображения сообщения о завершении игры -->
-
-    <div id="game-over-overlay" style="display: none;">
+    
+    <div id="game-over-overlay">
         <div id="game-over-message"></div>
         <button id="restart-button">Начать заново</button>
     </div>
 
     <script src="script.js"></script>
-
+    
+    <!-- PWA-функции для iOS -->
+    <script>
+        // Проверяем, открыто ли приложение в полноэкранном режиме
+        if (window.navigator.standalone) {
+            document.documentElement.style.setProperty('--status-bar-height', '20px');
+        }
+        
+        // Для iOS: предотвращаем стандартное поведение при добавлении на домашний экран
+        if (window.navigator.standalone === undefined) {
+            // Показываем инструкцию для добавления на домашний экран
+            let deferredPrompt;
+            
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                
+                // Можно показать кнопку для добавления на домашний экран
+                setTimeout(() => {
+                    if (confirm('Для лучшего опыта добавьте это приложение на домашний экран!')) {
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then(() => {
+                            deferredPrompt = null;
+                        });
+                    }
+                }, 3000);
+            });
+        }
+    </script>
 </body>
 </html>
-
