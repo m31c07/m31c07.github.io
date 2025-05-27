@@ -506,35 +506,32 @@ function animateCell() {
     if (animationQueue.move) {
         const { cellElement, newX, newY, oldX, oldY, newValue } = animationQueue.move;
 
-        // Создаем дубликат клетки для анимации
         const movingCell = cellElement.cloneNode(true);
-        movingCell.classList.add("moving"); // Добавляем класс для анимации
-
-        movingCell.style.position = "absolute";
-        movingCell.style.left = `${gridRect.left + oldY * 85}px`; // Смещение по X (колонка) + смещение сетки
-        movingCell.style.top = `${gridRect.top + oldX * 85}px`;  // Смещение по Y (строка) + смещение сетки
-
-        // Обновляем значения клеток перед анимацией
-        cellElement.textContent = newValue; // Оригинальная клетка
-        movingCell.textContent = newValue;  // Дубликат
-
-        // Добавляем дубликат в DOM
+        movingCell.classList.add("moving");
+        
+        // Позиционируем относительно gridElement
+        movingCell.style.left = `${oldY * 85}px`;
+        movingCell.style.top = `${oldX * 85}px`;
+        movingCell.style.width = '80px';
+        movingCell.style.height = '80px';
+        
         gridElement.appendChild(movingCell);
-
-        // Запускаем анимацию перемещения
-        setTimeout(() => {
-            movingCell.style.transition = "transform 0.3s ease";
+        
+        // Обновляем значения
+        cellElement.textContent = newValue;
+        movingCell.textContent = newValue;
+        
+        // Анимация через requestAnimationFrame для плавности
+        requestAnimationFrame(() => {
             movingCell.style.transform = `translate(${(newY - oldY) * 85}px, ${(newX - oldX) * 85}px)`;
-        }, 10);
-
-        // Удаляем дубликат после завершения анимации
+        });
+        
+        // Удаление после анимации
         setTimeout(() => {
             movingCell.remove();
-            animationQueue.move = null; // Очищаем параметры перемещения
-
-            // Обновляем сетку после завершения анимации перемещения
+            animationQueue.move = null;
             renderGrid();
-        }, 310); // 300 мс (анимация) + 10 мс (задержка)
+        }, 300);
     }
 
     // Анимация удаления
