@@ -2,63 +2,75 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#ffffff">
     <title>Реверсивная 2048</title>
     <style>
         * {
             -webkit-tap-highlight-color: transparent;
             -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
         }
         
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            text-align: center;
-            background-color: #faf8ef;
-            height: 100vh;
-            width: 100vw;
+        html, body {
+            height: 100%;
+            width: 100%;
             overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            padding: 10px;
+            position: fixed;
             touch-action: manipulation;
         }
         
-        h1 {
-            font-size: 24px;
-            margin: 10px 0;
-        }
-        
-        p {
-            font-size: 16px;
-            margin-bottom: 10px;
-        }
-        
-        #grid-container {
-            flex: 1;
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #faf8ef;
+            overscroll-behavior: none;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            max-height: calc(100vw - 20px);
-            max-width: calc(100vh - 120px);
-            margin: 0 auto;
+        }
+
+        .header {
+            margin-bottom: 20px;
+        }
+        
+        .game-container {
+            position: relative; /* Добавляем для корректного позиционирования */
+            transform-origin: center center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         
         .grid {
+            position: relative; /* Важно для абсолютного позиционирования анимированных клеток */
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            grid-template-rows: repeat(4, 1fr);
-            gap: 8px;
-            width: 100%;
-            height: 100%;
-            max-width: 400px;
-            max-height: 400px;
+            grid-template-columns: repeat(4, 80px);
+            grid-template-rows: repeat(4, 80px);
+            gap: 5px;
+            width: 340px;
+            height: 340px;
+            padding: 0px;
         }
-                
+        .moving {
+            position: absolute;
+            z-index: 10;
+            margin: 0 !important;
+            pointer-events: none;
+            transition: transform 0.3s ease;
+            transform: translate(0, 0);
+        }
         .cell {
+            width: 80px;
+            height: 80px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -66,7 +78,6 @@
             font-size: 24px;
             font-weight: bold;
             border-radius: 5px;
-            aspect-ratio: 1/1;
         }
         
         .filled {
@@ -99,26 +110,41 @@
         #game-over-message {
             text-align: center;
             color: white;
-            font-size: 24px;
-            margin-bottom: 20px;
-            padding: 0 20px;
+            font-size: 2em;
+            padding: 20px;
         }
 
         #restart-button {
-            padding: 12px 24px;
+            padding: 10px 20px;
             font-size: 18px;
             background-color: #ff5733;
             color: white;
             border: none;
             border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #restart-button:hover {
+            background-color: #e64a19;
+        }
+        
+        .moving {
+            position: absolute;
+            z-index: 10;
+        }
+        
+        .to-remove {
+            background-color: violet;
+            color: white;
         }
     </style>
 </head>
 <body>
-    <h1>Реверсивная 2048</h1>
-    <p>Используйте стрелки для деления чисел.</p>
-    
-    <div id="grid-container">
+    <div class="game-container">
+        <div class="header">
+            <h1>Реверсивная 2048</h1>
+            <p>Используйте стрелки для деления чисел.</p>
+        </div>
         <div class="grid" id="grid"></div>
     </div>
 
@@ -130,28 +156,38 @@
     <script src="script.js"></script>
     
     <script>
-        // Блокировка масштабирования на iOS
+        // Предотвращение стандартного поведения при касании
         document.addEventListener('touchmove', function(e) {
-            if(e.scale !== 1) e.preventDefault();
+            e.preventDefault();
         }, { passive: false });
         
-        // Адаптация под полноэкранный режим
-        function adjustLayout() {
-            const gridContainer = document.getElementById('grid-container');
-            const windowHeight = window.innerHeight;
-            const windowWidth = window.innerWidth;
-            
-            if (windowHeight > windowWidth) {
-                gridContainer.style.maxWidth = '100%';
-                gridContainer.style.maxHeight = (windowWidth - 20) + 'px';
-            } else {
-                gridContainer.style.maxHeight = '100%';
-                gridContainer.style.maxWidth = (windowHeight - 120) + 'px';
-            }
+        // Для iOS, чтобы при добавлении на домашний экран страница открывалась в полноэкранном режиме
+        if (window.navigator.standalone) {
+            document.documentElement.style.height = '100%';
+            document.body.style.height = '100%';
         }
-        
-        window.addEventListener('load', adjustLayout);
-        window.addEventListener('resize', adjustLayout);
+
+        // Функция масштабирования
+        function scaleGame() {
+            const container = document.querySelector('.game-container');
+            const windowWidth = window.innerWidth;
+            const windowHeight = window.innerHeight;
+            
+            // Размеры игрового контейнера (340x340 + заголовок)
+            const gameWidth = 340;
+            const gameHeight = 340 + 100; // 100 - примерная высота заголовка
+            
+            // Вычисляем масштаб
+            const scaleX = (windowWidth * 0.9) / gameWidth;
+            const scaleY = (windowHeight * 0.9) / gameHeight;
+            const scale = Math.min(scaleX, scaleY, 1); // Не увеличиваем больше 100%
+            
+            container.style.transform = `scale(${scale})`;
+        }
+
+        // Инициализация и обработка ресайза
+        window.addEventListener('load', scaleGame);
+        window.addEventListener('resize', scaleGame);
     </script>
 </body>
 </html>
