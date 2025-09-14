@@ -37,8 +37,7 @@ export const gameConfig = {
     minPlanets: 2,
     maxPlanets: 8,
     moonChance: 0.7,
-    ringChance: 0.3,
-    asteroidBeltChance: 0.5
+    ringChance: 0.3
   },
   empireColors: ['#00f', '#f00', '#0f0', '#ff0', '#0ff'],
   player: {
@@ -58,7 +57,7 @@ export const gameConfig = {
   },
   exploration: {
     baseExplorationTime: 300, // 5 seconds base
-    timePerObject: 300, // +5 seconds per planet/moon/belt
+    timePerObject: 300, // +5 seconds per planet/moon
     travelTime: 300, // Fixed 5 seconds travel time
     unexploredSystemName: '...',
     exploredSystems: new Set() // Will contain IDs of explored systems

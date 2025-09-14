@@ -8,6 +8,7 @@ import { FleetManager } from './utils/fleetManager.js';
 const canvas = document.getElementById('galaxy');
 let stars = generateGalaxyMap();
 let explorationSystem = new ExplorationSystem(stars);
+// Create fleetManager after stars are generated and startingSystemId is set
 let fleetManager = new FleetManager(stars);
 let stopGalaxyRender = null;
 let stopSystemRender = null;
@@ -20,9 +21,9 @@ window.explorationSystem = explorationSystem;
 setGalaxyCamMiddle();
 
 // Debug: Check if scout was created
-console.log('Starting system ID:', gameConfig.player.startingSystemId);
-console.log('Fleet at starting system:', fleetManager.getFleetAtSystem(gameConfig.player.startingSystemId));
-console.log('Scout config:', gameConfig.player.scout);
+// console.log('Starting system ID:', gameConfig.player.startingSystemId);
+// console.log('Fleet at starting system:', fleetManager.getFleetAtSystem(gameConfig.player.startingSystemId));
+// console.log('Scout config:', gameConfig.player.scout);
 
 // Сохраняем параметры камеры при переходах
 // let cameraState = {
@@ -38,7 +39,7 @@ function clearUI() {
   // console.log("kek main", gameConfig.galaxy.mapSize);
   // console.log("kek main", gameConfig.galaxy.mapSize.width);
   // console.log("kek main", gameConfig.galaxy.mapSize.height);
-  console.log("kek main", window.innerWidth, window.innerHeight);
+  // console.log("kek main", window.innerWidth, window.innerHeight);
 
 // gameConfig.ui.galaxyCamera.offsetX = (canvas.width - gameConfig.galaxy.mapSize.width)/2 * gameConfig.ui.galaxyCamera.scale + window.innerWidth/2;
 // gameConfig.ui.galaxyCamera.offsetY = (canvas.height - gameConfig.galaxy.mapSize.height)/2 * gameConfig.ui.galaxyCamera.scale + window.innerHeight/2;

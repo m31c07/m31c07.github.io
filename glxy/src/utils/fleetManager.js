@@ -14,20 +14,23 @@ export class FleetManager {
 
   initializeStartingFleet() {
     const startingSystemId = gameConfig.player.startingSystemId;
-    console.log('Initializing starting fleet for system:', startingSystemId);
+    // console.log('Initializing starting fleet for system:', startingSystemId);
     
     if (startingSystemId !== null) {
       const scout = this.createShip('scout', 'Scout Alpha', startingSystemId);
       this.addShipToSystem(scout, startingSystemId);
       
+      const scout2 = this.createShip('scout', 'Scout Beta', startingSystemId);
+      this.addShipToSystem(scout2, startingSystemId);
+
       // Update scout reference in gameConfig
       gameConfig.player.scout.shipId = scout.id;
       gameConfig.player.scout.currentSystemId = startingSystemId;
       
-      console.log('Scout created:', scout);
-      console.log('Fleet at starting system:', this.getFleetAtSystem(startingSystemId));
+      // console.log('Scout created:', scout);
+      // console.log('Fleet at starting system:', this.getFleetAtSystem(startingSystemId));
     } else {
-      console.error('No starting system ID found!');
+      // console.error('No starting system ID found!');
     }
   }
 
@@ -170,7 +173,7 @@ export class FleetManager {
     return null; // No path found
   }
 
-  // Move ship along a path
+  // Move ship along a path with milliseconds-based timing
   moveShipAlongPath(ship, path) {
     if (!ship || !path || path.length < 2) return false;
     
@@ -185,7 +188,7 @@ export class FleetManager {
     ship.moveStartTime = Date.now();
     ship.status = 'moving';
     
-    // Start movement to next system
+    // Start movement to next system with precise timing
     setTimeout(() => {
       this.completeShipMove(ship);
     }, ship.moveDuration);
@@ -318,7 +321,7 @@ export class FleetManager {
     gameConfig.player.scout.phase = 'idle';
   }
 
-  // Get movement progress for a ship (0-1)
+  // Get movement progress for a ship (0-1) using milliseconds-based timing
   getShipMoveProgress(ship) {
     if (!ship.isMoving || !ship.moveStartTime) return 0;
     
@@ -326,7 +329,7 @@ export class FleetManager {
     return Math.min(elapsed / ship.moveDuration, 1);
   }
 
-  // Get ship position during movement
+  // Get ship position during movement using milliseconds-based timing
   getShipPosition(ship) {
     if (!ship.isMoving || !ship.targetSystemId) {
       const currentStar = this.stars[ship.currentSystemId];

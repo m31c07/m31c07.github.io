@@ -82,7 +82,7 @@ export function generateGalaxyMap() {
     connections: [],
     owner: gameConfig.player.id,
     name: playerStartName,
-    planets: generatePlanetarySystem(playerStartName),
+    planets: generatePlanetarySystem(playerStartName, playerStartX, playerStartY),
     spectralType: 'G', // Sun-like star for player
     explored: true
   };
@@ -114,7 +114,7 @@ export function generateGalaxyMap() {
       connections: [],
       owner: null,
       name: starName,
-      planets: generatePlanetarySystem(starName),
+      planets: generatePlanetarySystem(starName, x, y),
       spectralType: getRandomSpectralType(),
       explored: false // All other stars are unexplored
     });

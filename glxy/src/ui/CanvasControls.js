@@ -256,6 +256,30 @@ export class CanvasControls {
   _onWheel(e) {
     e.preventDefault();
 
+    // Check if we're over the celestial menu and handle scrolling there first
+    if (gameConfig.ui.currentView === 'starsystem' && gameConfig.ui.celestialMenu) {
+      const rect = this.canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      // Check if mouse is over celestial menu (approximate position)
+      if (mouseX >= 20 && mouseX <= 300 && mouseY >= 20 && mouseY <= 420) {
+        const menuState = gameConfig.ui.celestialMenu;
+        if (menuState.maxScroll > 0) {
+          // Handle menu scrolling
+          menuState.scrollTop = Math.max(0, Math.min(
+            menuState.maxScroll, 
+            menuState.scrollTop + (e.deltaY > 0 ? 1 : -1)
+          ));
+          // Redraw the scene to update the menu
+          if (typeof window.drawSystem === 'function') {
+            window.drawSystem();
+          }
+          return;
+        }
+      }
+    }
+
     const rect = this.canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;

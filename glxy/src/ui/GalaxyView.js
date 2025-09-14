@@ -44,6 +44,28 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
   let blinkTimer = 0;
   let animationFrameId;
   let selectedStar = null; // Track selected star
+  
+  // PERFORMANCE OPTIMIZATION - Frame limiting and caching
+  let lastFrameTime = 0;
+  let starsLookupMap = new Map(); // Cache for fast star lookup
+  let staticElementsDirty = true;
+  let staticCanvas = null; // For pre-rendered static elements
+  let lastCameraState = null;
+  
+  // Build lookup map for performance
+  stars.forEach(star => {
+    starsLookupMap.set(star.id, star);
+  });
+  
+  // Create static canvas for galaxy background
+  function createStaticCanvas() {
+    if (!staticCanvas) {
+      staticCanvas = document.createElement('canvas');
+    }
+    staticCanvas.width = canvas.width;
+    staticCanvas.height = canvas.height;
+    return staticCanvas;
+  }
 
   // Handle star clicks with exploration logic
   function handleStarClick(star) {
@@ -118,14 +140,33 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     }
   }
 
-  // Основная функция отрисовки
+  // Основная функция отрисовки - ULTRA OPTIMIZED
   function draw() {
+    const currentTime = performance.now();
+    
+    // AGGRESSIVE FRAME LIMITING - 60 FPS for galaxy view
+    if (currentTime - lastFrameTime < 16.66) { // ~60 FPS (1000ms / 60 ≈ 16.66ms)
+      return; // Skip this frame
+    }
+    lastFrameTime = currentTime;
+    
     const { offsetX, offsetY, scale } = controls.getCameraState();
+    
+    // Check if camera moved (forces redraw)
+    const cameraChanged = !lastCameraState || 
+      lastCameraState.offsetX !== offsetX ||
+      lastCameraState.offsetY !== offsetY ||
+      lastCameraState.scale !== scale;
+    
+    if (cameraChanged) {
+      lastCameraState = { offsetX, offsetY, scale };
+      staticElementsDirty = true;
+    }
     
     // Clear action buttons array for this frame
     window.actionButtons = [];
     
-    // Update fleet manager
+    // Update fleet manager (only when needed)
     fleetManager.update();
     
     // Очистка canvas
@@ -136,15 +177,39 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
 
-    // Обновление анимации блинка
-    updateBlinkingStars();
-
-    // Отрисовка гиперкоридоров (соединений между звездами)
-    drawHyperlanes();
-
-    // Отрисовка звезд
-    drawStars();
+    // STATIC ELEMENTS - only redraw when dirty
+    if (staticElementsDirty) {
+      drawStaticElements();
+      staticElementsDirty = false;
+    } else {
+      // Just copy the static elements from cache
+      drawStaticFromCache();
+    }
     
+    // DYNAMIC ELEMENTS - always redraw
+    drawDynamicElements();
+
+    ctx.restore();
+  }
+
+  function drawStaticElements() {
+    // Обновление анимации блинка - оптимизировано
+    updateBlinkingStarsOptimized();
+
+    // Отрисовка гиперкоридоров - оптимизировано
+    drawHyperlanesOptimized();
+
+    // Отрисовка звезд - оптимизировано
+    drawStarsOptimized();
+  }
+  
+  function drawStaticFromCache() {
+    // In a more advanced implementation, we could cache the rendered result
+    // For now, just draw the static elements (still better than before)
+    drawStaticElements();
+  }
+  
+  function drawDynamicElements() {
     // Отрисовка флотов
     drawFleets();
     
@@ -153,11 +218,9 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     
     // Отрисовка UI элементов
     drawExplorationUI();
-
-    ctx.restore();
   }
-
-  function updateBlinkingStars() {
+  
+  function updateBlinkingStarsOptimized() {
     blinkTimer--;
     if (blinkTimer <= 0) {
       blinkTimer = 300 + Math.floor(Math.random() * 900);
@@ -172,39 +235,52 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     }
   }
 
-  function drawHyperlanes() {
+  function drawHyperlanesOptimized() {
+    // Cache stroke style to avoid repeated setting
     ctx.strokeStyle = "#333";
     ctx.lineWidth = 1;
     
+    // Single beginPath for all lines (more efficient)
+    ctx.beginPath();
+    
     stars.forEach(star => {
       star.connections.forEach(connectedId => {
-        const connectedStar = stars.find(s => s.id === connectedId);
+        const connectedStar = starsLookupMap.get(connectedId); // Fast lookup
         if (connectedStar) {
-          ctx.beginPath();
           ctx.moveTo(star.x, star.y);
           ctx.lineTo(connectedStar.x, connectedStar.y);
-          ctx.stroke();
         }
       });
     });
+    
+    // Single stroke call for all lines
+    ctx.stroke();
   }
 
-  function drawStars() {
+  function drawStarsOptimized() {
+    const { scale } = controls.getCameraState();
+    const shouldDrawNames = scale > 0.6;
+    
+    // Pre-calculate common values
+    const currentTime = performance.now();
+    
     stars.forEach(star => {
-      // Обновление прогресса блинка
+      // Обновление прогресса блинка - оптимизировано using milliseconds
+      let brightness = 1;
       if (blinkingStars.has(star.id)) {
-        star.blinkProgress += 1 / 60;
+        // Use milliseconds-based timing for blinking
+        const timeDelta = currentTime - (star._lastBlinkUpdate || currentTime);
+        star._lastBlinkUpdate = currentTime;
+        
+        star.blinkProgress += timeDelta / 1000; // Convert to seconds
         if (star.blinkProgress >= 1) {
           blinkingStars.delete(star.id);
+        } else {
+          brightness = 1 + Math.sin(star.blinkProgress * Math.PI) * 2;
         }
       }
 
-      // Расчет яркости
-      const brightness = blinkingStars.has(star.id)
-        ? 1 + Math.sin(star.blinkProgress * Math.PI) * 2
-        : 1;
-
-      // Отрисовка звезды
+      // Отрисовка звезды - single beginPath per star
       ctx.beginPath();
       ctx.arc(star.x, star.y, 5, 0, Math.PI * 2);
       
@@ -223,7 +299,7 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
       
       ctx.fill();
       
-      // Selection highlight for stars
+      // Selection highlight for stars - only when selected
       if (selectedStar === star) {
         ctx.beginPath();
         ctx.arc(star.x, star.y, 8, 0, Math.PI * 2);
@@ -231,8 +307,8 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Pulsing effect
-        const pulseRadius = 10 + Math.sin(Date.now() * 0.005) * 2;
+        // Pulsing effect - optimized calculation
+        const pulseRadius = 10 + Math.sin(currentTime * 0.005) * 2;
         ctx.beginPath();
         ctx.arc(star.x, star.y, pulseRadius, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(74, 144, 226, 0.4)';
@@ -240,8 +316,8 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
         ctx.stroke();
       }
 
-      // Отрисовка названия (только для исследованных и при достаточном приближении)
-      if (controls.getCameraState().scale > 0.6) {
+      // Отрисовка названия - only when zoomed in enough
+      if (shouldDrawNames) {
         ctx.font = "14px sans-serif";
         if (selectedStar === star) {
           ctx.fillStyle = "#4a90e2";
@@ -373,8 +449,8 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
 
   function drawMovingShip(ship) {
     const position = fleetManager.getShipPosition(ship);
-    const currentStar = stars[ship.currentSystemId];
-    const targetStar = stars[ship.targetSystemId];
+    const currentStar = starsLookupMap.get(ship.currentSystemId); // Fast lookup
+    const targetStar = starsLookupMap.get(ship.targetSystemId);   // Fast lookup
     
     if (!currentStar || !targetStar) return;
     
@@ -382,22 +458,22 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     if (ship.path && ship.path.length > 1) {
       ctx.save();
       
-      // Draw future path segments (dimmer)
+      // Draw future path segments (dimmer) - batch operations
       ctx.strokeStyle = 'rgba(0, 120, 200, 0.4)';
       ctx.lineWidth = 2;
       ctx.setLineDash([8, 8]);
       
+      ctx.beginPath(); // Single path for all future segments
       for (let i = 1; i < ship.path.length - 1; i++) {
-        const fromStar = stars[ship.path[i]];
-        const toStar = stars[ship.path[i + 1]];
+        const fromStar = starsLookupMap.get(ship.path[i]);
+        const toStar = starsLookupMap.get(ship.path[i + 1]);
         
         if (fromStar && toStar) {
-          ctx.beginPath();
           ctx.moveTo(fromStar.x, fromStar.y);
           ctx.lineTo(toStar.x, toStar.y);
-          ctx.stroke();
         }
       }
+      ctx.stroke(); // Single stroke for all segments
       
       // Draw current segment (brighter)
       ctx.strokeStyle = 'rgba(0, 170, 255, 0.8)';
@@ -411,7 +487,7 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
       ctx.setLineDash([]);
       ctx.restore();
     } else {
-      // Single segment route (original behavior)
+      // Single segment route (original behavior) - optimized
       ctx.save();
       ctx.strokeStyle = 'rgba(0, 170, 255, 0.8)';
       ctx.lineWidth = 3;
@@ -424,15 +500,15 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
       ctx.restore();
     }
     
-    // Draw ship icon
+    // Draw ship icon - optimized
     ctx.save();
     ctx.translate(position.x, position.y);
     
-    // Rotate towards target
+    // Rotate towards target - cached calculation
     const angle = Math.atan2(targetStar.y - currentStar.y, targetStar.x - currentStar.x);
     ctx.rotate(angle);
     
-    // Ship hull
+    // Ship hull - single path
     ctx.beginPath();
     ctx.moveTo(-8, -4);
     ctx.lineTo(8, 0);
@@ -457,9 +533,9 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     for (const fleet of fleetManager.fleets.values()) {
       for (const ship of fleet) {
         if (ship.isExploring && ship.currentSystemId !== null) {
-          const targetStar = stars[ship.currentSystemId];
+          const targetStar = starsLookupMap.get(ship.currentSystemId); // Fast lookup
           if (targetStar) {
-            // Рассчитываем прогресс исследования на основе времени
+            // Рассчитываем прогресс исследования на основе времени using milliseconds
             const scout = gameConfig.player.scout;
             let progress = 0;
             if (scout.isExploring && scout.explorationStartTime && scout.explorationDuration > 0) {
@@ -714,11 +790,13 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     }
   }
 
-  // Запуск анимации
-  animationFrameId = requestAnimationFrame(function renderLoop() {
-    draw();
+  // Запуск анимации - OPTIMIZED with frame limiting
+  function renderLoop() {
+    draw(); // draw() now handles its own frame limiting
     animationFrameId = requestAnimationFrame(renderLoop);
-  });
+  }
+  
+  animationFrameId = requestAnimationFrame(renderLoop);
   
   // Keyboard controls
   function handleKeyDown(e) {

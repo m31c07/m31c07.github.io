@@ -5,7 +5,7 @@ export class ExplorationSystem {
     this.stars = stars;
   }
 
-  // Calculate system complexity (planets + moons + asteroids)
+  // Calculate system complexity (planets + moons)
   calculateSystemComplexity(star) {
     let complexity = star.planets.planets.length; // Base planets
     
@@ -13,9 +13,6 @@ export class ExplorationSystem {
     star.planets.planets.forEach(planet => {
       complexity += planet.moons.length;
     });
-    
-    // Add asteroid belts if any
-    complexity += star.planets.asteroidBelts ? star.planets.asteroidBelts.length : 0;
     
     return complexity;
   }
