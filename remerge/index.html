@@ -2,47 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>WitchCraft - Game</title>
-    <link rel="stylesheet" href="styles/main.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creature Game Lobby</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="main-container">
-        <!-- Lobby Screen -->
-        <div id="lobby-screen" class="screen">
-            <div class="lobby-container">
-                <h1>WitchCraft</h1>
-                <div class="lobby-content">
-                    <button id="battle-button" class="main-button">В бой!</button>
-                    <div class="lobby-stats">
-                        <p>Этап: <span id="stage-display">0</span></p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Battle Screen -->
-        <div id="battle-screen" class="screen hidden">
-            <div class="game-container">
-                <div class="header">
-                    <h1>Реверсивная 2048</h1>
-                    <p>Используйте стрелки для деления чисел.</p>
-                    <div class="battle-stats">
-                        <p>Этап: <span id="battle-stage-display">0</span></p>
-                    </div>
-                </div>
-                <div class="grid" id="grid"></div>
-            </div>
-
-            <div id="game-over-overlay" class="hidden">
-                <div id="game-over-message"></div>
-                <button id="exit-battle-button">Выйти из боя</button>
-            </div>
-        </div>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="768" height="1376"></canvas>
     </div>
 
-    <script src="scripts/main.js"></script>
-    <script src="scripts/lobby.js"></script>
-    <script src="scripts/battle.js"></script>
+    <script src="js/main.js"></script>
 </body>
 </html>
