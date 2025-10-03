@@ -33,8 +33,8 @@ class QuestProgressModule {
     
     drawBackground() {
         // Gray background - can be replaced with an image later
-        this.ctx.fillStyle = '#888888';
-        this.ctx.fillRect(this.x, this.y, this.width, this.height);
+        // this.ctx.fillStyle = '#888888';
+        // this.ctx.fillRect(this.x, this.y, this.width, this.height);
         
         // Add a border
         this.ctx.strokeStyle = '#555555';

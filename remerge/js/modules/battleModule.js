@@ -23,12 +23,24 @@ class BattleModule {
         this.battleConfigModule = null;
         this.currencyModule = null;
         this.battleResult = null; // 'WIN' | 'LOSE' | null
+
+        // Background image: load once, draw after load
+        this.bgImage = new Image();
+        this.backgroundPath = 'img/back/bg_lobby_1.png';
+        this.bgImageLoaded = false;
+        this.bgImage.onload = () => { this.bgImageLoaded = true; console.log('Battle background loaded'); };
+        this.bgImage.onerror = () => { console.error('Failed to load battle background:', this.backgroundPath); };
+        this.bgImage.src = this.backgroundPath;
     }
 
     render() {
-        // Background
-        this.ctx.fillStyle = '#1a1a2e';
-        this.ctx.fillRect(0, 0, 768, 1376);
+        // Background (draw only after image is loaded; otherwise fallback fill)
+        if (this.bgImage && this.bgImage.complete && this.bgImage.naturalWidth !== 0) {
+            this.ctx.drawImage(this.bgImage, 0, 0, 768, 1376);
+        } else {
+            this.ctx.fillStyle = '#1a1a2e';
+            this.ctx.fillRect(0, 0, 768, 1376);
+        }
 
         this.renderEnemy();
         if (this.questProgressModule) {
@@ -103,7 +115,7 @@ class BattleModule {
         this.ctx.fillText(text, 384, 550);
         this.ctx.fillStyle = '#FFFFFF';
         this.ctx.font = '24px Arial';
-        this.ctx.fillText('Нажмите EXIT, чтобы вернуться в лобби', 384, 620);
+        this.ctx.fillText('Нажмите чтобы вернуться в лобби', 384, 620);
         this.ctx.textAlign = 'left';
         this.ctx.restore();
     }

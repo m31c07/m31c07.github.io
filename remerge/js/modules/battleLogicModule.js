@@ -220,17 +220,15 @@ class BattleLogicModule {
     }
 
     handleBoardSwipe(startX, startY, endX, endY, boardPos, attemptMoveCallback) {
-        if (startX < boardPos.boardX || startX >= boardPos.boardX + boardPos.boardSize ||
-            startY < boardPos.boardY || startY >= boardPos.boardY + boardPos.boardSize) return;
+        // Обрабатываем свайп для выделенного кристалла независимо от точки начала жеста
+        if (!this.highlightedCrystal) return;
 
-        const startCol = Math.floor((startX - boardPos.boardX) / boardPos.slotSize);
-        const startRow = Math.floor((startY - boardPos.boardY) / boardPos.slotSize);
+        const startRow = this.highlightedCrystal.row;
+        const startCol = this.highlightedCrystal.col;
+
+        // Защита от некорректных позиций
         if (this.isExcludedCell(startRow, startCol)) return;
-
-        if (!this.board[startRow][startCol] ||
-            !this.highlightedCrystal ||
-            this.highlightedCrystal.row !== startRow ||
-            this.highlightedCrystal.col !== startCol) return;
+        if (!this.board[startRow][startCol]) return;
 
         let targetRow = startRow, targetCol = startCol;
         const deltaX = endX - startX, deltaY = endY - startY;
