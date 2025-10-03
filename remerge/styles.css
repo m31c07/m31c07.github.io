@@ -8,11 +8,16 @@ body {
     overflow: hidden;
     background-color: #000;
     font-family: Arial, sans-serif;
+    min-height: 100dvh;
+    overscroll-behavior: none;
 }
 
 #gameContainer {
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
+    height: calc(var(--vh, 1vh) * 100);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
     display: flex;
     justify-content: center;
     align-items: center;

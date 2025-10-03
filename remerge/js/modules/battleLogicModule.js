@@ -1,13 +1,31 @@
+// Класс BattleLogicModule — новая утилита снятия метки после хода
 class BattleLogicModule {
     constructor() {
         this.board = Array.from({ length: 5 }, () => Array(5).fill(null));
         this.highlightedCrystal = null;
         this.pendingRemoval = [];
 
-        this.boardSize = 650;
-        this.slotSize = this.boardSize / 5;
-        this.boardX = (768 - this.boardSize) / 2;
+        this.boardSize = 770;
+        this.slotSize = 110;
+        // this.boardX = (770 - this.boardSize) / 2;
+        this.boardX = 100;
         this.boardY = 500;
+
+        // Background image for the battle board
+        this.boardBgImage = new Image();
+        this.boardBgImage.src = 'img/back/bg_battle_board.png';
+        this.boardBgImage.onload = () => { console.log('Battle board background loaded'); };
+        this.boardBgImage.onerror = () => { console.error('Failed to load battle board background'); };
+    }
+
+    // Exclude corner slots from the playable board
+    isExcludedCell(row, col) {
+        return (
+            (row === 0 && col === 0) ||
+            (row === 0 && col === 4) ||
+            (row === 4 && col === 0) ||
+            (row === 4 && col === 4)
+        );
     }
 
     initializeBoard() {
@@ -15,7 +33,7 @@ class BattleLogicModule {
         this.pendingRemoval = [];
         const row = Math.floor(Math.random() * 5);
         const col = Math.floor(Math.random() * 5);
-        this.board[row][col] = { level: 7, type: 'fire' };
+        // this.board[row][col] = { level: 7, type: 'fire' };
     }
 
     setPlayerCreature(creature) {
@@ -26,7 +44,7 @@ class BattleLogicModule {
         const directions = [[-1,0],[0,1],[1,0],[0,-1]];
         return directions.some(([dr, dc]) => {
             const r = row + dr, c = col + dc;
-            return r >= 0 && r < 5 && c >= 0 && c < 5 && this.board[r][c] === null;
+            return r >= 0 && r < 5 && c >= 0 && c < 5 && !this.isExcludedCell(r, c) && this.board[r][c] === null;
         });
     }
 
@@ -34,6 +52,7 @@ class BattleLogicModule {
         if (toRow < 0 || toRow >= 5 || toCol < 0 || toCol >= 5) return false;
         const rowDiff = Math.abs(fromRow - toRow);
         const colDiff = Math.abs(fromCol - toCol);
+        if (this.isExcludedCell(fromRow, fromCol) || this.isExcludedCell(toRow, toCol)) return false;
         return ((rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1)) && this.board[toRow][toCol] === null;
     }
 
@@ -130,12 +149,62 @@ class BattleLogicModule {
         }, 200);
     }
 
+    // Спавн кристалла в случайную пустую клетку, с флажком justSpawned
+    spawnCrystal(level, type) {
+        const empty = [];
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                if (this.board[r][c] === null && !this.isExcludedCell(r, c)) empty.push({ r, c });
+            }
+        }
+        if (empty.length === 0) return false;
+        const { r, c } = empty[Math.floor(Math.random() * empty.length)];
+        this.board[r][c] = { level, type, justSpawned: 1 };
+        return { row: r, col: c };
+    }
+
+    // Новый метод: снимаем оранжевую метку у кристаллов после хода
+    decrementJustSpawned() {
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                const crystal = this.board[r][c];
+                if (crystal && crystal.justSpawned) {
+                    crystal.justSpawned--;
+                    if (crystal.justSpawned <= 0) delete crystal.justSpawned;
+                }
+            }
+        }
+    }
+    // Проверка: все клетки пустые
+    isBoardEmpty() {
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                if (this.board[r][c]) return false;
+            }
+        }
+        return true;
+    }
+
+    // Проверка: остались только кристаллы, помеченные к удалению
+    isOnlyMarkedCrystalsLeft() {
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                const crystal = this.board[r][c];
+                if (crystal && !crystal.markedForRemoval) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     handleBoardClick(x, y, boardPos, attemptMoveCallback) {
         if (x < boardPos.boardX || x >= boardPos.boardX + boardPos.boardSize ||
             y < boardPos.boardY || y >= boardPos.boardY + boardPos.boardSize) return;
 
         const col = Math.floor((x - boardPos.boardX) / boardPos.slotSize);
         const row = Math.floor((y - boardPos.boardY) / boardPos.slotSize);
+        if (this.isExcludedCell(row, col)) return;
 
         if (!this.board[row][col]) return;
         if (!this.highlightedCrystal || this.highlightedCrystal.row !== row || this.highlightedCrystal.col !== col) return;
@@ -156,6 +225,7 @@ class BattleLogicModule {
 
         const startCol = Math.floor((startX - boardPos.boardX) / boardPos.slotSize);
         const startRow = Math.floor((startY - boardPos.boardY) / boardPos.slotSize);
+        if (this.isExcludedCell(startRow, startCol)) return;
 
         if (!this.board[startRow][startCol] ||
             !this.highlightedCrystal ||
@@ -188,29 +258,46 @@ class BattleLogicModule {
 
     highlightRandomCrystal() {
         const splittable = [];
+        const splittableNonSpawned = [];
         for (let r = 0; r < 5; r++) {
             for (let c = 0; c < 5; c++) {
                 const crystal = this.board[r][c];
-                if (crystal && crystal.level > 1 && this.hasAdjacentEmptySpaces(r,c) && !crystal.markedForRemoval) {
+                if (!this.isExcludedCell(r, c) && crystal && crystal.level > 1 && this.hasAdjacentEmptySpaces(r, c) && !crystal.markedForRemoval) {
                     splittable.push({ row: r, col: c });
+                    if (!crystal.justSpawned) {
+                        splittableNonSpawned.push({ row: r, col: c });
+                    }
                 }
             }
         }
-        this.highlightedCrystal = splittable.length ? splittable[Math.floor(Math.random() * splittable.length)] : null;
+        const pool = splittableNonSpawned.length ? splittableNonSpawned : splittable;
+        this.highlightedCrystal = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
     }
 
 
     checkBattleEnd() {
-        let count = 0, splittable=false;
-        const pendingSet = new Set(this.pendingRemoval.map(p=>`${p.row},${p.col}`));
-        for (let r=0;r<5;r++) for (let c=0;c<5;c++){
-            if (pendingSet.has(`${r},${c}`)) continue;
-            if (this.board[r][c]) {
-                count++;
-                if (this.board[r][c].level>1 && this.hasAdjacentEmptySpaces(r,c)) splittable=true;
+        // Подсчитываем оставшиеся (не помеченные к удалению) кристаллы
+        let count = 0;
+        let splittable = false;
+        const pendingSet = new Set(this.pendingRemoval.map(p => `${p.row},${p.col}`));
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                if (pendingSet.has(`${r},${c}`)) continue;
+                const crystal = this.board[r][c];
+                if (crystal) {
+                    count++;
+                    // Клетка доступна для сплита, если уровень > 1, есть соседняя пустая,
+                    // и кристалл не помечен к удалению
+                    if (crystal.level > 1 && this.hasAdjacentEmptySpaces(r, c) && !crystal.markedForRemoval) {
+                        splittable = true;
+                    }
+                }
             }
         }
-        if (count===0 || !splittable) console.log("Battle ended");
+
+        if (count === 0) return { ended: true, result: 'WIN' };
+        if (!splittable) return { ended: true, result: 'LOSE' };
+        return { ended: false, result: null };
     }
 
     isTargetPositionAnimated(row, col, animations) {
@@ -239,7 +326,12 @@ class BattleLogicModule {
         const x = fromX + (toX-fromX)*progress;
         const y = fromY + (toY-fromY)*progress;
         ctx.fillStyle='#8B0000';
-        ctx.fillRect(x+5,y+5,boardPos.slotSize-14,boardPos.slotSize-14);
+        const cx = x + boardPos.slotSize/2;
+        const cy = y + boardPos.slotSize/2;
+        const r = (boardPos.slotSize-14)/2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fill();
         ctx.fillStyle='#000'; ctx.font='bold 20px Arial'; ctx.textAlign='center';
         ctx.fillText(level.toString(),x+boardPos.slotSize/2,y+boardPos.slotSize/2+6); ctx.textAlign='left';
     }
@@ -251,7 +343,11 @@ class BattleLogicModule {
         const y = boardPos.boardY + row*boardPos.slotSize;
         const scale = 1 + progress, opacity = 1 - progress;
         ctx.save(); ctx.globalAlpha = opacity; ctx.translate(x+boardPos.slotSize/2,y+boardPos.slotSize/2); ctx.scale(scale,scale);
-        ctx.fillStyle='#FF00FF'; ctx.fillRect(-boardPos.slotSize/2+5,-boardPos.slotSize/2+5,boardPos.slotSize-14,boardPos.slotSize-14);
+        ctx.fillStyle='#FF00FF';
+        const r = (boardPos.slotSize-14)/2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI*2);
+        ctx.fill();
         ctx.fillStyle='#000'; ctx.font='bold 20px Arial'; ctx.textAlign='center'; ctx.fillText(level.toString(),0,6); ctx.textAlign='left'; ctx.restore();
     }
 
@@ -259,20 +355,27 @@ class BattleLogicModule {
         const x = boardPos.boardX + col * boardPos.slotSize;
         const y = boardPos.boardY + row * boardPos.slotSize;
 
-        if (!crystal) return;
+        if (!crystal || this.isExcludedCell(row, col)) return;
 
-        // Если кристалл в pendingRemoval — красим в фиолетовый
         const isPendingRemoval = this.pendingRemoval.some(pos => pos.row === row && pos.col === col);
 
-        if (isPendingRemoval) {
-            ctx.fillStyle = '#FF00FF'; // фиолетовый для кристаллов к удалению
-        } else if (highlightedCrystal && highlightedCrystal.row === row && highlightedCrystal.col === col) {
-            ctx.fillStyle = '#8B0000'; // темно-красный для выделенного
+        // Приоритет: выбранный > к удалению > justSpawned > обычный
+        if (highlightedCrystal && highlightedCrystal.row === row && highlightedCrystal.col === col) {
+            ctx.fillStyle = '#8B0000';
+        } else if (isPendingRemoval) {
+            ctx.fillStyle = '#FF00FF';
+        } else if (crystal.justSpawned) {
+            ctx.fillStyle = '#FFA500';
         } else {
-            ctx.fillStyle = '#FFD700'; // желтый для обычного
+            ctx.fillStyle = '#FFD700';
         }
 
-        ctx.fillRect(x + 5, y + 5, boardPos.slotSize - 14, boardPos.slotSize - 14);
+        const cx = x + boardPos.slotSize/2;
+        const cy = y + boardPos.slotSize/2;
+        const r = (boardPos.slotSize - 14)/2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fill();
 
         ctx.fillStyle = '#000';
         ctx.font = 'bold 20px Arial';
@@ -285,12 +388,28 @@ class BattleLogicModule {
 
     renderBoard(ctx,isTargetPositionAnimated){
         const boardPos=this.getBoardPosition();
-        ctx.fillStyle='#16213e'; ctx.fillRect(boardPos.boardX-10,boardPos.boardY-10,boardPos.boardSize+20,boardPos.boardSize+20);
+        // Draw background image behind the grid if loaded, else fallback fill
+        if (this.boardBgImage && this.boardBgImage.complete && this.boardBgImage.naturalWidth !== 0) {
+            // Image size is 770x770, center it around the 650x650 grid
+            const bgX = boardPos.boardX - 110;
+            const bgY = boardPos.boardY - 112;
+            ctx.drawImage(this.boardBgImage, bgX, bgY, 770, 770);
+        } else {
+            // Fallback background around the board
+            ctx.fillStyle='#16213e';
+            ctx.fillRect(boardPos.boardX-10,boardPos.boardY-10,boardPos.boardSize+20,boardPos.boardSize+20);
+        }
         const board=this.getBoard(), highlightedCrystal=this.getHighlightedCrystal();
         for(let r=0;r<5;r++) for(let c=0;c<5;c++){
-            const x=boardPos.boardX+c*boardPos.slotSize, y=boardPos.boardY+r*boardPos.slotSize;
-            ctx.fillStyle='#0f3460'; ctx.fillRect(x,y,boardPos.slotSize-4,boardPos.slotSize-4);
-            ctx.strokeStyle='#1e3a8a'; ctx.lineWidth=2; ctx.strokeRect(x,y,boardPos.slotSize-4,boardPos.slotSize-4);
+            // const x=boardPos.boardX+c*boardPos.slotSize, y=boardPos.boardY+r*boardPos.slotSize;
+            // if (!this.isExcludedCell(r, c)) {
+            //     // Слот как круг: тонкая обводка
+            //     const cx = x + boardPos.slotSize/2;
+            //     const cy = y + boardPos.slotSize/2;
+            //     const rr = (boardPos.slotSize-4)/2;
+            //     ctx.strokeStyle='#1e3a8a'; ctx.lineWidth=2;
+            //     ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2); ctx.stroke();
+            // }
             if(board[r][c] && !(board[r][c].animating && isTargetPositionAnimated(r,c))) this.drawCrystal(ctx,r,c,board[r][c],highlightedCrystal,boardPos);
         }
     }

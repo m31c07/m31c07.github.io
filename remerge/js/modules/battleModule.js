@@ -18,6 +18,11 @@ class BattleModule {
         this.animations = [];
         this.isAnimating = false;
         this.fastAnimation = false;
+        this.currentTurn = 1;
+        this.totalTurns = 1;
+        this.battleConfigModule = null;
+        this.currencyModule = null;
+        this.battleResult = null; // 'WIN' | 'LOSE' | null
     }
 
     render() {
@@ -34,6 +39,7 @@ class BattleModule {
         this.battleLogic.renderBoard(this.ctx, this.isTargetPositionAnimated.bind(this));
         this.drawAnimations();
         this.renderExitButton();
+        this.renderBattleEndOverlay();
     }
 
     renderEnemy() {
@@ -82,11 +88,35 @@ class BattleModule {
         this.ctx.textAlign = 'left';
     }
 
+    renderBattleEndOverlay() {
+        if (!this.battleResult) return;
+        // Полупрозрачный оверлей
+        this.ctx.save();
+        this.ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        this.ctx.fillRect(0, 0, 768, 1376);
+
+        // Текст результата
+        const text = this.battleResult === 'WIN' ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ';
+        this.ctx.fillStyle = this.battleResult === 'WIN' ? '#4CAF50' : '#F44336';
+        this.ctx.font = 'bold 72px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(text, 384, 550);
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.font = '24px Arial';
+        this.ctx.fillText('Нажмите EXIT, чтобы вернуться в лобби', 384, 620);
+        this.ctx.textAlign = 'left';
+        this.ctx.restore();
+    }
+
     handleBattleClick(x, y) {
+        // return { type: 'SWITCH_TO_LOBBY' };
         if (x >= this.exitButton.x && x <= this.exitButton.x + this.exitButton.width &&
             y >= this.exitButton.y && y <= this.exitButton.y + this.exitButton.height) {
             return { type: 'SWITCH_TO_LOBBY' };
         }
+
+        // Если бой завершён — игнорируем клики по полю
+        if (this.battleResult) return { type: 'SWITCH_TO_LOBBY' };
 
         const boardPos = this.battleLogic.getBoardPosition();
         const wrappedCallback = (fromRow, fromCol, toRow, toCol) => this.processMoveWrapper(fromRow, fromCol, toRow, toCol);
@@ -95,6 +125,7 @@ class BattleModule {
     }
 
     handleSwipe(startX, startY, endX, endY) {
+        if (this.battleResult) return null;
         const boardPos = this.battleLogic.getBoardPosition();
         const wrappedCallback = (fromRow, fromCol, toRow, toCol) => this.processMoveWrapper(fromRow, fromCol, toRow, toCol);
         this.battleLogic.handleBoardSwipe(startX, startY, endX, endY, boardPos, wrappedCallback);
@@ -102,72 +133,76 @@ class BattleModule {
     }
 
     handleKeyboard(key) {
+        if (this.battleResult) return null;
         const wrappedCallback = (fromRow, fromCol, toRow, toCol) => this.processMoveWrapper(fromRow, fromCol, toRow, toCol);
         this.battleLogic.handleKeyboardInput(key, wrappedCallback);
         return null;
     }
 
-    // processMoveWrapper(fromRow, fromCol, toRow, toCol) {
-    //     const moveResult = this.battleLogic.processMove(fromRow, fromCol, toRow, toCol);
-    //     if (!moveResult.success) return false;
-
-    //     this.isAnimating = true;
-    //     this.fastAnimation = false;
-
-    //     if (this.battleLogic.pendingRemoval.length > 0) {
-    //         this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
-    //             this.startDisappearAnimation(row, col, level);
-    //         });
-    //     }
-
-    //     const { fromRow: fr, fromCol: fc, toRow: tr, toCol: tc, splitResult } = moveResult;
-    //     this.startMoveAnimation(fr, fc, tr, tc, moveResult.crystalAtDestination.level, () => {
-    //         if (splitResult && splitResult.shouldDisappear) {
-    //             this.battleLogic.markShardsForRemoval(fr, fc, tr, tc, () => {
-    //                 this.battleLogic.highlightRandomCrystal();
-    //                 this.battleLogic.clearAnimatingFlag(tr, tc);
-    //                 this.render();
-    //             });
-    //         } else {
-    //             this.battleLogic.clearAnimatingFlag(tr, tc);
-    //             this.battleLogic.highlightRandomCrystal();
-    //             this.render();
-    //         }
-    //     });
-
-    //     return true;
-    // }
     processMoveWrapper(fromRow, fromCol, toRow, toCol) {
         const moveResult = this.battleLogic.processMove(fromRow, fromCol, toRow, toCol);
         if (!moveResult.success) return false;
-
         this.isAnimating = true;
         this.fastAnimation = false;
 
-        const { fromRow: fr, fromCol: fc, toRow: tr, toCol: tc, splitResult } = moveResult;
+        const { fromRow: fr, fromCol: fc, toRow: tr, toCol: tc } = moveResult;
 
-        if (this.battleLogic.pendingRemoval.length > 0) {
-            this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
-                this.startDisappearAnimation(row, col, level);
-            });
-        }
-        // ⚡ Здесь сразу проверяем на поглощение пэтом
-        // this.battleLogic.markShardsForRemoval(fr, fc, tr, tc);
-        // this.battleLogic.markShardsForRemoval(fr, fc, tr, tc, this.playerCreature);
-        this.battleLogic.markShardsForRemoval(this.playerCreature);
-
-
-
-        // Запускаем анимацию движения
         this.startMoveAnimation(fr, fc, tr, tc, moveResult.crystalAtDestination.level, () => {
-            // После анимации обработка удалений
-
-            // Очистка флагов и обновление
             this.battleLogic.clearAnimatingFlag(tr, tc);
-        });
 
-        this.battleLogic.highlightRandomCrystal();
-        this.render();
+            const cfg = this.battleConfigModule?.getBattleConfigFor(this.playerCreature);
+            const nextCrystalEvent = cfg
+                ? (cfg.events ?? [])
+                    .filter(ev => ev.type === 'crystal' && ev.turn > this.currentTurn)
+                    .sort((a, b) => a.turn - b.turn)[0]
+                : null;
+
+            // Логика продвижения хода:
+            // - Если поле пустое: перепрыгиваем к ближайшему спавну (если есть), иначе +1
+            // - Если остались только помеченные к удалению: просто +1 автоход
+            if (this.battleLogic.isBoardEmpty()) {
+                this.currentTurn = nextCrystalEvent ? nextCrystalEvent.turn : (this.currentTurn + 1);
+            } else if (this.battleLogic.isOnlyMarkedCrystalsLeft()) {
+                this.currentTurn = this.currentTurn + 1;
+            } else {
+                this.currentTurn = this.currentTurn + 1;
+            }
+
+            this.battleLogic.decrementJustSpawned();
+
+            if (cfg) {
+                for (const ev of (cfg.events ?? [])) {
+                    if (ev.type === 'crystal' && ev.turn === this.currentTurn) {
+                        this.battleLogic.spawnCrystal(ev.level, ev.element);
+                    }
+                }
+            }
+
+            if (this.questProgressModule) {
+                this.questProgressModule.setCurrentTurn(this.currentTurn);
+                this.questProgressModule.startMovement();
+                setTimeout(() => { this.questProgressModule?.stopMovement(); }, 500);
+            }
+
+            if (this.battleLogic.pendingRemoval.length > 0) {
+                this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
+                    this.startDisappearAnimation(row, col, level);
+                });
+            }
+
+            const proceedAfterRemovals = () => {
+                this.battleLogic.markShardsForRemoval(this.playerCreature);
+                this.battleLogic.highlightRandomCrystal();
+                this.render();
+            };
+
+        const delayMs = this.battleLogic.pendingRemoval.length > 0 ? 220 : 0;
+            setTimeout(() => {
+                proceedAfterRemovals();
+                this.checkAndHandleBattleEnd();
+                this.render();
+            }, delayMs);
+        });
         return true;
     }
 
@@ -203,15 +238,106 @@ class BattleModule {
         if (remaining.length === 0) { this.isAnimating=false; this.fastAnimation=false; }
 
         finishedCallbacks.forEach(cb => { try { cb(); } catch(e){ console.error(e); } });
+
+        // Авто-переход хода: если на поле пусто или остались только помеченные,
+        // перепрыгиваем к ближайшему ходу со спавном и спавним ДО удаления.
+        if (!this.isAnimating) {
+            this.autoAdvanceIfOnlyMarkedOrEmpty();
+            this.checkAndHandleBattleEnd();
+        }
     }
 
     // setPlayerCreature(creature) { this.playerCreature = creature; }
     setCreatureDisplayModule(module) { this.creatureDisplayModule = module; }
     setQuestProgressModule(module) { this.questProgressModule = module; }
+    setBattleConfigModule(module) { this.battleConfigModule = module; }
+    setCurrencyModule(module) { this.currencyModule = module; }
+
+    // Новый помощник: автопереход хода без действия игрока,
+    // сохраняя отложенное удаление (спавним перед удалением)
+    autoAdvanceIfOnlyMarkedOrEmpty() {
+        const cfg = this.battleConfigModule?.getBattleConfigFor(this.playerCreature);
+        if (!cfg) return;
+
+        const onlyMarked = this.battleLogic.isOnlyMarkedCrystalsLeft();
+        const boardEmpty = this.battleLogic.isBoardEmpty();
+        if (!onlyMarked && !boardEmpty) return;
+
+        // Если осталось только помеченное — просто +1 автоход
+        if (onlyMarked) {
+            this.currentTurn += 1;
+            this.battleLogic.decrementJustSpawned();
+
+            // Спавним новые кристаллы на текущем ходе ДО удаления
+            for (const ev of (cfg.events ?? [])) {
+                if (ev.type === 'crystal' && ev.turn === this.currentTurn) {
+                    this.battleLogic.spawnCrystal(ev.level, ev.element);
+                }
+            }
+
+            if (this.questProgressModule) {
+                this.questProgressModule.setCurrentTurn(this.currentTurn);
+                this.questProgressModule.startMovement();
+                setTimeout(() => { this.questProgressModule?.stopMovement(); }, 500);
+            }
+        } else if (boardEmpty) {
+            // Если поле пустое — перепрыгиваем к ближайшему будущему спавну
+            const nextCrystalEvent = (cfg.events ?? [])
+                .filter(ev => ev.type === 'crystal' && ev.turn > this.currentTurn)
+                .sort((a, b) => a.turn - b.turn)[0] || null;
+            if (!nextCrystalEvent) return;
+
+            this.currentTurn = nextCrystalEvent.turn;
+            this.battleLogic.decrementJustSpawned();
+
+            for (const ev of (cfg.events ?? [])) {
+                if (ev.type === 'crystal' && ev.turn === this.currentTurn) {
+                    this.battleLogic.spawnCrystal(ev.level, ev.element);
+                }
+            }
+
+            if (this.questProgressModule) {
+                this.questProgressModule.setCurrentTurn(this.currentTurn);
+                this.questProgressModule.startMovement();
+                setTimeout(() => { this.questProgressModule?.stopMovement(); }, 500);
+            }
+        }
+
+        // Затем удаляем ранее помеченные (если есть) — с анимацией
+        if (this.battleLogic.pendingRemoval.length > 0) {
+            this.isAnimating = true;
+            this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
+                this.startDisappearAnimation(row, col, level);
+            });
+        }
+
+        // После удаления помечаем новые, подсвечиваем и перерисовываем
+        const delayMs = this.battleLogic.pendingRemoval.length > 0 ? 220 : 0;
+        setTimeout(() => {
+            this.battleLogic.markShardsForRemoval(this.playerCreature);
+            this.battleLogic.highlightRandomCrystal();
+            this.render();
+        }, delayMs);
+    }
 
     onEnter(data) {
         if (data && data.playerCreature) this.setPlayerCreature(data.playerCreature);
         this.battleLogic.initializeBoard();
+
+        const cfg = this.battleConfigModule?.getBattleConfigFor(this.playerCreature);
+        if (cfg) {
+            this.totalTurns = cfg.totalTurns ?? 1;
+            this.currentTurn = 1;
+            for (const ev of (cfg.events ?? [])) {
+                if (ev.type === 'crystal' && ev.turn === 1) {
+                    this.battleLogic.spawnCrystal(ev.level, ev.element);
+                }
+            }
+            if (this.questProgressModule) {
+                this.questProgressModule.setBattleConfig(cfg);
+                this.questProgressModule.setCurrentTurn(this.currentTurn);
+            }
+        }
 
         if (this.battleLogic.pendingRemoval.length > 0) {
             this.isAnimating = true;
@@ -222,14 +348,76 @@ class BattleModule {
                 this.battleLogic.highlightRandomCrystal();
                 this.isAnimating = false;
                 this.render();
+                this.checkAndHandleBattleEnd();
             }, 200);
         } else {
             this.battleLogic.highlightRandomCrystal();
+            this.checkAndHandleBattleEnd();
         }
 
         if (this.questProgressModule) {
             this.questProgressModule.startMovement();
             setTimeout(()=>{ if(this.questProgressModule) this.questProgressModule.stopMovement(); },1000);
+        }
+    }
+
+    onExit() {
+        // Сбросить все флаги и временные состояния боя
+        this.isSwiping = false;
+        this.swipeStart = { x: 0, y: 0 };
+        this.swipeEnd = { x: 0, y: 0 };
+        this.animations = [];
+        this.isAnimating = false;
+        this.fastAnimation = false;
+        this.currentTurn = 1;
+        this.totalTurns = 1;
+        this.battleResult = null;
+
+        // Остановить анимацию прогресса квеста
+        if (this.questProgressModule && typeof this.questProgressModule.stopMovement === 'function') {
+            this.questProgressModule.stopMovement();
+        }
+
+        // Очистить состояние логики боя
+        if (this.battleLogic && typeof this.battleLogic.initializeBoard === 'function') {
+            this.battleLogic.initializeBoard();
+        }
+        if (this.battleLogic) {
+            this.battleLogic.highlightedCrystal = null;
+            this.battleLogic.pendingRemoval = [];
+        }
+    }
+
+    checkAndHandleBattleEnd() {
+        const res = this.battleLogic.checkBattleEnd();
+        if (res && res.ended) {
+            // Если победа, но в конфиге есть будущие спавны кристаллов — не завершаем бой
+            if (res.result === 'WIN' && this.battleConfigModule) {
+                const cfg = this.battleConfigModule.getBattleConfigFor(this.playerCreature);
+                const hasFutureCrystal = (cfg?.events ?? []).some(ev => ev.type === 'crystal' && ev.turn > this.currentTurn);
+                if (hasFutureCrystal) {
+                    // Поле пусто, но впереди будут спавны — пусть авто‑переход дойдёт до ближайшего
+                    return;
+                }
+            }
+
+            // Устанавливаем результат боя
+            const prevResult = this.battleResult;
+            this.battleResult = res.result; // 'WIN' или 'LOSE'
+
+            // Начисляем награду из конфига только один раз, при первой фиксации победы
+            if (!prevResult && this.battleResult === 'WIN' && this.battleConfigModule && this.currencyModule) {
+                const cfg = this.battleConfigModule.getBattleConfigFor(this.playerCreature);
+                const rewardCurrency = cfg?.reward?.currency || {};
+                const gold = Number(rewardCurrency.gold || 0);
+                const gem = Number(rewardCurrency.gem || 0);
+                if (gold > 0 && typeof this.currencyModule.addGold === 'function') {
+                    this.currencyModule.addGold(gold);
+                }
+                if (gem > 0 && typeof this.currencyModule.addGems === 'function') {
+                    this.currencyModule.addGems(gem);
+                }
+            }
         }
     }
 
@@ -241,7 +429,8 @@ class BattleModule {
                 handleClick: (x,y) => this.handleBattleClick(x,y),
                 handleSwipe: (sx,sy,ex,ey) => this.handleSwipe(sx,sy,ex,ey),
                 handleKeyboard: key => this.handleKeyboard(key),
-                onEnter: data => this.onEnter(data)
+                onEnter: data => this.onEnter(data),
+                onExit: () => this.onExit()
             }
         };
     }

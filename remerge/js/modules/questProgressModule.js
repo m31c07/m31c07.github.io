@@ -9,14 +9,12 @@ class QuestProgressModule {
         // Animation properties
         this.animationFrame = 0;
         this.animationSpeed = 0.05;
-        this.isMoving = false; // Track if creature is moving
-        
-        // Spots for mobs, chests, etc.
+        this.isMoving = false;
+        this.totalTurns = 1;
+        this.currentTurn = 1;
+        this.events = [];
         this.spots = [
-            { x: 100, y: 100, type: 'player', occupied: true },
-            { x: 300, y: 100, type: 'mob', occupied: false },
-            { x: 500, y: 100, type: 'chest', occupied: false },
-            { x: 700, y: 100, type: 'mob', occupied: false }
+            { x: this.computeXForTurn(1), y: 300, type: 'player', occupied: true }
         ];
     }
     
@@ -45,21 +43,18 @@ class QuestProgressModule {
     }
     
     drawSpots() {
-        // Draw spots/containers for mobs, chests, etc.
         this.spots.forEach(spot => {
-            this.ctx.fillStyle = spot.occupied ? '#444444' : '#666666';
-            this.ctx.fillRect(spot.x - 25, spot.y - 25, 50, 50);
-            
-            // Add a border to spots
-            this.ctx.strokeStyle = '#333333';
-            this.ctx.lineWidth = 1;
-            this.ctx.strokeRect(spot.x - 25, spot.y - 25, 50, 50);
-            
-            // Mark the spot type
-            this.ctx.fillStyle = '#FFFFFF';
-            this.ctx.font = '12px Arial';
-            this.ctx.textAlign = 'center';
-            this.ctx.fillText(spot.type.charAt(0).toUpperCase(), spot.x, spot.y + 5);
+            if (spot.type === 'crystal') {
+                this.ctx.fillStyle = spot.occupied ? '#444444' : '#666666';
+                this.ctx.fillRect(spot.x - 25, spot.y - 25, 50, 50);
+                this.ctx.strokeStyle = '#333333';
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(spot.x - 25, spot.y - 25, 50, 50);
+                this.ctx.fillStyle = '#FFFFFF';
+                this.ctx.font = '12px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(String(spot.level), spot.x, spot.y + 5);
+            }
         });
     }
     
@@ -139,5 +134,30 @@ class QuestProgressModule {
     getStateConfig() {
         // This module is not a standalone state, so it returns null
         return null;
+    }
+
+    setBattleConfig(cfg) {
+        this.totalTurns = cfg?.totalTurns ?? 1;
+        this.events = Array.isArray(cfg?.events) ? cfg.events.filter(e => e.type === 'crystal') : [];
+        this.spots = [ { x: this.computeXForTurn(1), y: 300, type: 'player', occupied: true } ];
+        for (const ev of this.events) {
+            this.spots.push({ x: this.computeXForTurn(ev.turn), y: 300, type: 'crystal', level: ev.level, turn: ev.turn, occupied: false });
+        }
+    }
+
+    setCurrentTurn(turn) {
+        this.currentTurn = Math.max(1, Math.min(turn, this.totalTurns));
+        const player = this.spots.find(s => s.type === 'player');
+        if (player) player.x = this.computeXForTurn(this.currentTurn);
+        for (const s of this.spots) {
+            if (s.type === 'crystal') s.occupied = (s.turn <= this.currentTurn);
+        }
+    }
+
+    computeXForTurn(turn) {
+        const padding = 40;
+        const usableWidth = this.width - padding * 2;
+        const step = this.totalTurns > 1 ? usableWidth / (this.totalTurns - 1) : 0;
+        return this.x + padding + step * (turn - 1);
     }
 }

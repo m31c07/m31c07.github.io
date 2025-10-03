@@ -298,7 +298,8 @@ class Game {
             { path: 'js/modules/creatureListModule.js', name: 'creatureListModule', factory: (ctx) => new CreatureListModule(ctx) },
             { path: 'js/modules/creatureDataModule.js', name: 'creatureDataModule', factory: (ctx) => new CreatureDataModule() },
             { path: 'js/modules/lobbyModule.js', name: 'lobbyModule', factory: (ctx) => new LobbyModule(ctx) },
-            { path: 'js/modules/questProgressModule.js', name: 'questProgressModule', factory: (ctx) => new QuestProgressModule(ctx) }
+            { path: 'js/modules/questProgressModule.js', name: 'questProgressModule', factory: (ctx) => new QuestProgressModule(ctx) },
+            { path: 'js/modules/battleConfigModule.js', name: 'battleConfigModule', factory: () => new BattleConfigModule() }
         ];
         
         // Load all module scripts
@@ -329,6 +330,16 @@ class Game {
         if (this.modules.battleModule && this.modules.questProgressModule) {
             console.log('Setting quest progress module in battle module');
             this.modules.battleModule.setQuestProgressModule(this.modules.questProgressModule);
+        }
+
+        if (this.modules.battleModule && this.modules.battleConfigModule) {
+            this.modules.battleModule.setBattleConfigModule(this.modules.battleConfigModule);
+        }
+
+        // Pass currency module to battle module for rewards
+        if (this.modules.battleModule && this.modules.currencyModule) {
+            console.log('Setting currency module in battle module');
+            this.modules.battleModule.setCurrencyModule(this.modules.currencyModule);
         }
         
         console.log('All modules loaded');
@@ -379,6 +390,14 @@ class Game {
         requestAnimationFrame(() => this.gameLoop());
     }
 }
+
+function setViewportHeightVar() {
+    const vh = (window.visualViewport?.height || window.innerHeight) * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+}
+window.addEventListener('resize', setViewportHeightVar);
+window.addEventListener('orientationchange', setViewportHeightVar);
+window.addEventListener('load', setViewportHeightVar);
 
 // Initialize the game when the page loads
 window.addEventListener('load', () => {
