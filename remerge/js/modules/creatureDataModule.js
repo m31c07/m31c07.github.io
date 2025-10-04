@@ -10,9 +10,10 @@ class CreatureDataModule {
                 maxHp: 100,
                 imagePath: 'img/creatures/fox1.png',
                 image: new Image(),
+                absorptionSlots: 2, // максимум кристаллов, которые можно поглотить за раз
                 absorption: {
-                    // fire: { 2: 0.75, 3: 0.5, 4: 0.25 }
-                    fire: { 2: 1, 3: 1, 4: 1, 5: 1 }
+                    fire: { 2: 0.75, 3: 0.5, 4: 0.25 }
+                    // fire: { 2: 1, 3: 1, 4: 1, 5: 1 }
                 }
             },
             { 

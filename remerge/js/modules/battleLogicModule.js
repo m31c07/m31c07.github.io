@@ -97,31 +97,84 @@ class BattleLogicModule {
 
     //     if (onComplete) onComplete();
     // }
+    // markShardsForRemoval(playerCreature, onComplete) {
+    //     for (let r = 0; r < 5; r++) {
+    //         for (let c = 0; c < 5; c++) {
+    //             const crystal = this.board[r][c];
+    //             if (!crystal) continue;
+
+    //             // Уже помеченный кристалл пропускаем
+    //             if (crystal.markedForRemoval) continue;
+
+    //             let chance = 0;
+    //             if (crystal.level === 1) {
+    //                 chance = 1; // базовый уровень всегда помечаем
+    //             } else {
+    //                 const absorption = playerCreature?.absorption?.[crystal.type] || {};
+    //                 chance = absorption[crystal.level] ?? 0;
+    //             }
+
+    //             if (Math.random() < chance) {
+    //                 this.pendingRemoval.push({ row: r, col: c });
+    //                 crystal.markedForRemoval = true; // для визуальной отрисовки
+    //             }
+    //         }
+    //     }
+
+    //     // Вызываем только если это функция
+    //     if (typeof onComplete === 'function') onComplete();
+    // }
     markShardsForRemoval(playerCreature, onComplete) {
-        for (let r = 0; r < 5; r++) {
-            for (let c = 0; c < 5; c++) {
+        const gridSize = this.board.length;
+
+        // ----------------------
+        // 0. Автоматическое исчезновение уровня 1
+        // ----------------------
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
                 const crystal = this.board[r][c];
-                if (!crystal) continue;
-
-                // Уже помеченный кристалл пропускаем
-                if (crystal.markedForRemoval) continue;
-
-                let chance = 0;
-                if (crystal.level === 1) {
-                    chance = 1; // базовый уровень всегда помечаем
-                } else {
-                    const absorption = playerCreature?.absorption?.[crystal.type] || {};
-                    chance = absorption[crystal.level] ?? 0;
-                }
-
-                if (Math.random() < chance) {
+                if (crystal && crystal.level === 1) {
                     this.pendingRemoval.push({ row: r, col: c });
-                    crystal.markedForRemoval = true; // для визуальной отрисовки
+                    crystal.markedForRemoval = true;
                 }
             }
         }
 
-        // Вызываем только если это функция
+        // ----------------------
+        // 1. Поглощение
+        // ----------------------
+        const candidates = [];
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
+                const crystal = this.board[r][c];
+                if (!crystal) continue;
+                if (crystal.level === 1 || crystal.markedForRemoval) continue;
+
+                const absorption = playerCreature?.absorption?.[crystal.type] || {};
+                const chance = absorption[crystal.level] ?? 0;
+
+                if (chance > 0 && Math.random() < chance) {
+                    candidates.push({ r, c, crystal });
+                }
+            }
+        }
+
+        if (candidates.length) {
+            const slots = playerCreature?.absorptionSlots ?? candidates.length;
+
+            const toRemove = candidates
+                .sort(() => Math.random() - 0.5) // перемешиваем
+                .slice(0, Math.min(slots, candidates.length));
+
+            for (const { r, c, crystal } of toRemove) {
+                this.pendingRemoval.push({ row: r, col: c });
+                crystal.markedForRemoval = true;
+            }
+        }
+
+        // ----------------------
+        // callback
+        // ----------------------
         if (typeof onComplete === 'function') onComplete();
     }
 
@@ -294,7 +347,12 @@ class BattleLogicModule {
         }
 
         if (count === 0) return { ended: true, result: 'WIN' };
-        if (!splittable) return { ended: true, result: 'LOSE' };
+        // Если прямо сейчас нет доступных сплитов, но есть отложенные удаления,
+        // не завершаем поражением — после анимаций появятся свободные клетки
+        if (!splittable) {
+            if (this.pendingRemoval.length > 0) return { ended: false, result: null };
+            return { ended: true, result: 'LOSE' };
+        }
         return { ended: false, result: null };
     }
 
