@@ -27,6 +27,18 @@ class CreatureDataModule {
                 absorption: {
                     ice: { 1: 1, 2: 1, 3: 1 }
                 }
+            },
+            { 
+                id: 2, 
+                name: "Kapibara", 
+                level: 3,
+                hp: 100,
+                maxHp: 100,
+                imagePath: 'img/creatures/kapibara1.png',
+                image: new Image(),
+                absorption: {
+                    Stone: { 1: 1, 2: 1, 3: 1 }
+                }
             }
         ];
         

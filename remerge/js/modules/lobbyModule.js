@@ -18,7 +18,7 @@ class LobbyModule {
         // Store battle button coordinates for click detection
         this.battleButton = {
             x: 284,
-            y: 1150,
+            y: 1050,
             width: 200,
             height: 60
         };

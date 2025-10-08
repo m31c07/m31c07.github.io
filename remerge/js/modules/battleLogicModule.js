@@ -251,6 +251,35 @@ class BattleLogicModule {
         return true;
     }
 
+    // Удалить случайные кристаллы с поля и вернуть их количество
+    removeRandomCrystals(count) {
+        const positions = [];
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                if (!this.isExcludedCell(r, c) && this.board[r][c]) {
+                    positions.push({ r, c });
+                }
+            }
+        }
+        if (positions.length === 0) return 0;
+
+        // Перемешать и выбрать нужное количество
+        positions.sort(() => Math.random() - 0.5);
+        const toRemove = positions.slice(0, Math.min(count, positions.length));
+
+        for (const { r, c } of toRemove) {
+            this.board[r][c] = null;
+        }
+
+        // Сброс выделения, если выделенный кристалл был удалён
+        if (this.highlightedCrystal) {
+            const { row, col } = this.highlightedCrystal;
+            if (!this.board[row]?.[col]) this.highlightedCrystal = null;
+        }
+
+        return toRemove.length;
+    }
+
     handleBoardClick(x, y, boardPos, attemptMoveCallback) {
         if (x < boardPos.boardX || x >= boardPos.boardX + boardPos.boardSize ||
             y < boardPos.boardY || y >= boardPos.boardY + boardPos.boardSize) return;

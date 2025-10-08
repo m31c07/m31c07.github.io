@@ -2,7 +2,7 @@ class CurrencyModule {
     constructor(ctx) {
         this.ctx = ctx;
         this.gold = 1000;
-        this.gems = 100;
+        this.gems = 0;
     }
     
     render() {
@@ -60,5 +60,4 @@ class CurrencyModule {
         }
         return false;
     }
-
 }

@@ -14,6 +14,8 @@ class BattleModule {
         this.enemy = { id: 1, name: "Dark Goblin", level: 3, hp: 80, maxHp: 80 };
 
         this.exitButton = { x: 648, y: 1300, width: 100, height: 50 };
+        // Кнопка продолжения боя при поражении
+        this.continueButton = { x: (768-300)/2, y: 700, width: 300, height: 80 };
 
         this.animations = [];
         this.isAnimating = false;
@@ -116,6 +118,19 @@ class BattleModule {
         this.ctx.fillStyle = '#FFFFFF';
         this.ctx.font = '24px Arial';
         this.ctx.fillText('Нажмите чтобы вернуться в лобби', 384, 620);
+
+        // Кнопка продолжить за 100 GOLD только при поражении
+        if (this.battleResult === 'LOSE') {
+            const btn = this.continueButton;
+            const enough = !!this.currencyModule && (this.currencyModule.gold >= 100);
+            this.ctx.fillStyle = enough ? '#4CAF50' : '#555555';
+            this.ctx.fillRect(btn.x, btn.y, btn.width, btn.height);
+            this.ctx.fillStyle = '#FFFFFF';
+            this.ctx.font = 'bold 26px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('ПРОДОЛЖИТЬ (100 GOLD)', btn.x + btn.width/2, btn.y + btn.height/2 + 8);
+            this.ctx.textAlign = 'left';
+        }
         this.ctx.textAlign = 'left';
         this.ctx.restore();
     }
@@ -127,8 +142,25 @@ class BattleModule {
             return { type: 'SWITCH_TO_LOBBY' };
         }
 
-        // Если бой завершён — игнорируем клики по полю
-        if (this.battleResult) return { type: 'SWITCH_TO_LOBBY' };
+        // Если бой завершён — обработаем кнопку продолжения или выход
+        if (this.battleResult) {
+            if (this.battleResult === 'LOSE') {
+                const btn = this.continueButton;
+                const inBtn = x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height;
+                if (inBtn && this.currencyModule && typeof this.currencyModule.spendGold === 'function') {
+                    if (this.currencyModule.spendGold(100)) {
+                        // Удаляем случайные 4 кристалла и продолжаем бой
+                        this.battleLogic.removeRandomCrystals(4);
+                        this.battleLogic.highlightRandomCrystal();
+                        this.battleResult = null;
+                        this.checkAndHandleBattleEnd();
+                        this.render();
+                        return null;
+                    }
+                }
+            }
+            return { type: 'SWITCH_TO_LOBBY' };
+        }
 
         const boardPos = this.battleLogic.getBoardPosition();
         const wrappedCallback = (fromRow, fromCol, toRow, toCol) => this.processMoveWrapper(fromRow, fromCol, toRow, toCol);

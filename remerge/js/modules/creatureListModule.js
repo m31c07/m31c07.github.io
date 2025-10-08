@@ -6,17 +6,23 @@ class CreatureListModule {
         
         // Store layout properties to avoid hardcoded values
         this.layout = {
-            listY: 1250,
-            itemWidth: 120,
-            itemHeight: 100,
+            listY: 1150,
+            listWidth: 749,
+            listHeight: 266,
+            itemWidth: 150,
+            itemHeight: 150,
             itemSpacing: 20,
-            startX: 50,
+            startX: 80,
             leftScrollX: 0,
             leftScrollWidth: 30,
-            rightScrollX: 738,
+            rightScrollX: 719,
             rightScrollWidth: 30,
-            canvasWidth: 768
+            // canvasWidth: 768
         };
+
+        // Load UI assets for the creature list background
+        this.scrollBgImage = new Image();
+        this.scrollBgImage.src = 'img/ui/creatures_scroll_bg.png';
     }
     
     // Set the creature data module reference
@@ -32,16 +38,20 @@ class CreatureListModule {
         
         const creatures = this.creatureDataModule.getAllCreatures();
         
-        // Draw background for creature list
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        this.ctx.fillRect(0, this.layout.listY, this.layout.canvasWidth, 126);
+        // Draw background for creature list (image if loaded, fallback to color)
+        if (this.scrollBgImage && this.scrollBgImage.complete) {
+            this.ctx.drawImage(this.scrollBgImage, 0, this.layout.listY - 50, this.layout.listWidth, this.layout.listHeight);
+        } else {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            this.ctx.fillRect(0, this.layout.listY, this.layout.listWidth, this.layout.listHeight);
+        }
         
         // Draw creatures
         creatures.forEach((creature, index) => {
             const x = this.layout.startX + index * (this.layout.itemWidth + this.layout.itemSpacing) + this.scrollOffset;
             
-            // Only draw if visible
-            if (x > -this.layout.itemWidth && x < this.layout.canvasWidth) {
+            // Only draw if visible within list width
+            if (x > -this.layout.itemWidth && x < this.layout.listWidth) {
                 // Highlight selected creature
                 if (index === this.selectedCreature) {
                     this.ctx.fillStyle = '#4CAF50';
@@ -54,7 +64,7 @@ class CreatureListModule {
                 
                 // Draw creature image
                 if (creature.image && creature.image.complete) {
-                    const imageSize = 100;
+                    const imageSize = 150;
                     const imageX = x + this.layout.itemWidth/2 - imageSize/2;
                     const imageY = this.layout.listY+15;
                     this.ctx.drawImage(creature.image, imageX, imageY, imageSize, imageSize);
@@ -89,11 +99,11 @@ class CreatureListModule {
             this.ctx.fillText('<', 10, this.layout.listY + 70);
         }
         
-        if (creatures.length * (this.layout.itemWidth + this.layout.itemSpacing) + this.scrollOffset > this.layout.canvasWidth) {
+        if (creatures.length * (this.layout.itemWidth + this.layout.itemSpacing) + this.scrollOffset > this.layout.listWidth) {
             this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
             this.ctx.font = 'bold 24px Arial';
             this.ctx.textAlign = 'right';
-            this.ctx.fillText('>', 758, this.layout.listY + 70);
+            this.ctx.fillText('>', this.layout.listWidth - 10, this.layout.listY + 70);
         }
         
         this.ctx.textAlign = 'left';
@@ -110,7 +120,7 @@ class CreatureListModule {
         let creatureSelected = false;
         
         // Check if click is on scroll buttons
-        if (y >= this.layout.listY && y <= this.layout.listY + 126) {
+        if (y >= this.layout.listY && y <= this.layout.listY + this.layout.listHeight) {
             // Left scroll button
             if (x >= this.layout.leftScrollX && x <= this.layout.leftScrollX + this.layout.leftScrollWidth && this.scrollOffset < 0) {
                 this.scrollOffset += 50;
@@ -119,7 +129,7 @@ class CreatureListModule {
             
             // Right scroll button
             if (x >= this.layout.rightScrollX && x <= this.layout.rightScrollX + this.layout.rightScrollWidth && 
-                creatures.length * (this.layout.itemWidth + this.layout.itemSpacing) + this.scrollOffset > this.layout.canvasWidth) {
+                creatures.length * (this.layout.itemWidth + this.layout.itemSpacing) + this.scrollOffset > this.layout.listWidth) {
                 this.scrollOffset -= 50;
                 return false; // Return false for scroll actions
             }
