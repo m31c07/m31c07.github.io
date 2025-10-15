@@ -19,6 +19,7 @@ class BattleModule {
 
         this.animations = [];
         this.isAnimating = false;
+        this.isCascadeInProgress = false; // Блокируем свайпы на время каскада
         this.fastAnimation = false;
         this.currentTurn = 1;
         this.totalTurns = 1;
@@ -170,6 +171,7 @@ class BattleModule {
 
     handleSwipe(startX, startY, endX, endY) {
         if (this.battleResult) return null;
+        if (this.isCascadeInProgress) return null; // Игнорируем свайпы во время каскада
         const boardPos = this.battleLogic.getBoardPosition();
         const wrappedCallback = (fromRow, fromCol, toRow, toCol) => this.processMoveWrapper(fromRow, fromCol, toRow, toCol);
         this.battleLogic.handleBoardSwipe(startX, startY, endX, endY, boardPos, wrappedCallback);
@@ -228,24 +230,24 @@ class BattleModule {
                 setTimeout(() => { this.questProgressModule?.stopMovement(); }, 500);
             }
 
-            if (this.battleLogic.pendingRemoval.length > 0) {
-                this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
-                    this.startDisappearAnimation(row, col, level);
-                });
-            }
-
             const proceedAfterRemovals = () => {
                 this.battleLogic.markShardsForRemoval(this.playerCreature);
                 this.battleLogic.highlightRandomCrystal();
-                this.render();
+                // Рендер вызывается игровым циклом; избегаем рекурсивного render() здесь
             };
 
-        const delayMs = this.battleLogic.pendingRemoval.length > 0 ? 220 : 0;
-            setTimeout(() => {
+            if (this.battleLogic.pendingRemoval.length > 0) {
+                this.isCascadeInProgress = true;
+                this.battleLogic.processPendingRemovalsWithAnimation(
+                    (row, col, level) => { this.startDisappearAnimation(row, col, level); },
+                    (row, col, level) => { this.startIgniteAnimation(row, col, level); },
+                    () => { this.isCascadeInProgress = false; proceedAfterRemovals(); this.checkAndHandleBattleEnd(); /* рендер произойдет в следующем кадре */ }
+                );
+            } else {
                 proceedAfterRemovals();
                 this.checkAndHandleBattleEnd();
-                this.render();
-            }, delayMs);
+                // Не вызываем render() напрямую, чтобы избежать рекурсивного стека
+            }
         });
         return true;
     }
@@ -262,6 +264,9 @@ class BattleModule {
     startDisappearAnimation(row, col, level, onComplete) {
         this.animations.push({ type:'disappear', row, col, level, startTime:Date.now(), duration:this.fastAnimation?20:200, onComplete });
     }
+    startIgniteAnimation(row, col, level, onComplete) {
+        this.animations.push({ type:'ignite', row, col, level, startTime:Date.now(), duration:this.fastAnimation?20:180, onComplete });
+    }
 
     drawAnimations() {
         const currentTime = Date.now();
@@ -273,6 +278,7 @@ class BattleModule {
             const progress = Math.min((currentTime - anim.startTime)/anim.duration, 1);
             if (anim.type === 'move') this.battleLogic.drawMoveAnimation(this.ctx, anim, progress, boardPos);
             else if (anim.type === 'disappear') this.battleLogic.drawDisappearAnimation(this.ctx, anim, progress, boardPos);
+            else if (anim.type === 'ignite') this.battleLogic.drawIgniteAnimation(this.ctx, anim, progress, boardPos);
 
             if (progress < 1) remaining.push(anim);
             else if (typeof anim.onComplete === 'function') finishedCallbacks.push(anim.onComplete);
@@ -350,18 +356,17 @@ class BattleModule {
         // Затем удаляем ранее помеченные (если есть) — с анимацией
         if (this.battleLogic.pendingRemoval.length > 0) {
             this.isAnimating = true;
-            this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
-                this.startDisappearAnimation(row, col, level);
-            });
-        }
-
-        // После удаления помечаем новые, подсвечиваем и перерисовываем
-        const delayMs = this.battleLogic.pendingRemoval.length > 0 ? 220 : 0;
-        setTimeout(() => {
+            this.isCascadeInProgress = true;
+            this.battleLogic.processPendingRemovalsWithAnimation(
+                (row, col, level) => { this.startDisappearAnimation(row, col, level); },
+                (row, col, level) => { this.startIgniteAnimation(row, col, level); },
+                () => { this.isCascadeInProgress = false; this.battleLogic.markShardsForRemoval(this.playerCreature); this.battleLogic.highlightRandomCrystal(); /* рендер произойдет в следующем кадре */ }
+            );
+        } else {
             this.battleLogic.markShardsForRemoval(this.playerCreature);
             this.battleLogic.highlightRandomCrystal();
-            this.render();
-        }, delayMs);
+            // Избегаем прямого вызова render()
+        }
     }
 
     onEnter(data) {
@@ -385,15 +390,12 @@ class BattleModule {
 
         if (this.battleLogic.pendingRemoval.length > 0) {
             this.isAnimating = true;
-            this.battleLogic.processPendingRemovalsWithAnimation((row, col, level) => {
-                this.startDisappearAnimation(row, col, level);
-            });
-            setTimeout(() => {
-                this.battleLogic.highlightRandomCrystal();
-                this.isAnimating = false;
-                this.render();
-                this.checkAndHandleBattleEnd();
-            }, 200);
+            this.isCascadeInProgress = true;
+            this.battleLogic.processPendingRemovalsWithAnimation(
+                (row, col, level) => { this.startDisappearAnimation(row, col, level); },
+                (row, col, level) => { this.startIgniteAnimation(row, col, level); },
+                () => { this.isCascadeInProgress = false; this.battleLogic.highlightRandomCrystal(); this.isAnimating = false; this.checkAndHandleBattleEnd(); /* рендер выполнится игровым циклом */ }
+            );
         } else {
             this.battleLogic.highlightRandomCrystal();
             this.checkAndHandleBattleEnd();

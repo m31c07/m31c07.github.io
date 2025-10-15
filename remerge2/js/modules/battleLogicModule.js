@@ -192,14 +192,148 @@ class BattleLogicModule {
         }
     }
 
-    processPendingRemovalsWithAnimation(startDisappearAnimationCallback) {
+    processPendingRemovalsWithAnimation(startDisappearAnimationCallback, startIgniteAnimationCallback, onCascadeComplete) {
+        // Двухфазный каскад:
+        // Фаза A (удаление): каждый удаляемый уровня n исчезает и поджигает ортососедей уровня (n+1).
+        // Фаза B (гашение): все подожжённые снижают свой уровень на 1 и снимают поджог.
+        // Если во время гашения какой-то кристалл стал уровнем 1, он попадает в следующую волну удаления.
+        // Повторяем A→B, пока больше нечего удалять/гасить.
+
+        const keyOf = (r, c) => `${r},${c}`;
+        // Соседние клетки: только ортогональные (без диагоналей)
+        const dirs = [
+            { dr: -1, dc: 0 }, // up
+            { dr: 1, dc: 0 },  // down
+            { dr: 0, dc: -1 }, // left
+            { dr: 0, dc: 1 }   // right
+        ];
+
+        // Уберём дубликаты и сформируем стартовую волну из ВСЕХ помеченных к удалению
+        const unique = new Map();
         for (const pos of this.pendingRemoval) {
-            if (this.board[pos.row][pos.col]) startDisappearAnimationCallback(pos.row, pos.col, this.board[pos.row][pos.col].level);
+            const k = keyOf(pos.row, pos.col);
+            if (!unique.has(k)) unique.set(k, pos);
         }
-        setTimeout(() => {
-            this.pendingRemoval.forEach(pos => this.board[pos.row][pos.col] = null);
+
+        let currentWave = Array.from(unique.values()).filter(p => {
+            const crystal = this.board[p.row]?.[p.col];
+            return !!crystal && crystal.markedForRemoval;
+        });
+        // Без глобальных "visited" — действуем строго по шагам каскада
+
+        const processDeletionWave = (deletionWave, carryIgniteWave = []) => {
+            // Фаза A: анимация исчезновения
+            for (const pos of deletionWave) {
+                const crystal = this.board[pos.row]?.[pos.col];
+                if (!crystal) continue;
+                startDisappearAnimationCallback?.(pos.row, pos.col, crystal.level);
+            }
+            setTimeout(() => {
+                const igniteWave = [];
+                for (const pos of deletionWave) {
+                    const crystal = this.board[pos.row]?.[pos.col];
+                    if (!crystal) continue;
+                    const n = crystal.level;
+                    // Физическое удаление
+                    this.board[pos.row][pos.col] = null;
+                    // Поджог соседей уровня (n+1)
+                    for (const d of dirs) {
+                        const nr = pos.row + d.dr;
+                        const nc = pos.col + d.dc;
+                        if (nr < 0 || nr >= 5 || nc < 0 || nc >= 5) continue;
+                        if (this.isExcludedCell(nr, nc)) continue;
+                        const neigh = this.board[nr]?.[nc];
+                        if (!neigh) continue;
+                        // Не зажигаем уже горящие и проверяем правило n+1
+                        if (neigh.ignited) continue;
+                        if (neigh.level === n + 1) {
+                            startIgniteAnimationCallback?.(nr, nc, neigh.level);
+                            neigh.ignited = true;
+                            igniteWave.push({ row: nr, col: nc });
+                        }
+                    }
+                }
+                // Объединяем фронт поджога, возникший из удаления, с
+                // заранее рассчитанным фронтом (carryIgniteWave) из предыдущего шага
+                const combinedMap = new Map();
+                for (const p of igniteWave) combinedMap.set(keyOf(p.row, p.col), p);
+                for (const p of carryIgniteWave) combinedMap.set(keyOf(p.row, p.col), p);
+                const combinedIgniteWave = Array.from(combinedMap.values());
+
+                if (combinedIgniteWave.length > 0) processIgniteWave(combinedIgniteWave);
+                else {
+                    this.pendingRemoval = [];
+                    if (typeof onCascadeComplete === 'function') {
+                        try { onCascadeComplete(); } catch(e) { console.error(e); }
+                    }
+                }
+            }, 200);
+        };
+
+        const processIgniteWave = (igniteWave) => {
+            // Фаза B: гашение (снижение уровня на 1, снятие ignited)
+            setTimeout(() => {
+                const nextDeletionWave = [];
+                const nextIgniteWave = [];
+                for (const pos of igniteWave) {
+                    const crystal = this.board[pos.row]?.[pos.col];
+                    if (!crystal) continue;
+                    const preLevel = crystal.level; // уровень до снижения
+                    // Сначала снижаем уровень на 1
+                    crystal.level = Math.max(1, preLevel - 1);
+
+                    // Если стал уровнем 1 — попадёт в следующую волну удаления
+                    if (crystal.level === 1 && !crystal.markedForRemoval) {
+                        crystal.markedForRemoval = true;
+                        nextDeletionWave.push({ row: pos.row, col: pos.col });
+                    }
+
+                    // «В следующем каскадном шаге подожжённый может поджечь своих n+1 соседей»
+                    // n — это исходный уровень до снижения (preLevel)
+                    for (const d of dirs) {
+                        const nr = pos.row + d.dr;
+                        const nc = pos.col + d.dc;
+                        if (nr < 0 || nr >= 5 || nc < 0 || nc >= 5) continue;
+                        if (this.isExcludedCell(nr, nc)) continue;
+                        const neigh = this.board[nr]?.[nc];
+                        if (!neigh) continue;
+                        // Не зажигаем уже горящие сейчас, проверяем k+1
+                        if (neigh.ignited) continue;
+                        if (neigh.level === preLevel + 1) {
+                            startIgniteAnimationCallback?.(nr, nc, neigh.level);
+                            neigh.ignited = true;
+                            nextIgniteWave.push({ row: nr, col: nc });
+                        }
+                    }
+
+                    // После обработки соседей снимаем горение с текущей плитки
+                    if (crystal.ignited) delete crystal.ignited;
+                }
+
+                // Приоритет шага: если есть удаление — выполняем волну удаления;
+                // иначе, если есть новый фронт поджога — продолжаем поджог;
+                // иначе — каскад завершён.
+                if (nextDeletionWave.length > 0) {
+                    // ВАЖНО: не теряем фронт поджога — передаём его как carry
+                    processDeletionWave(nextDeletionWave, nextIgniteWave);
+                } else if (nextIgniteWave.length > 0) {
+                    processIgniteWave(nextIgniteWave);
+                } else {
+                    this.pendingRemoval = [];
+                    if (typeof onCascadeComplete === 'function') {
+                        try { onCascadeComplete(); } catch(e) { console.error(e); }
+                    }
+                }
+            }, 180);
+        };
+
+        // Если нечего удалять, просто сбросим pendingRemoval
+        if (currentWave.length === 0) {
             this.pendingRemoval = [];
-        }, 200);
+            return;
+        }
+
+        processDeletionWave(currentWave);
     }
 
     // Спавн кристалла в случайную пустую клетку, с флажком justSpawned
@@ -213,7 +347,6 @@ class BattleLogicModule {
         if (empty.length === 0) return false;
         const { r, c } = empty[Math.floor(Math.random() * empty.length)];
         this.board[r][c] = { level, type, justSpawned: 1 };
-        try { console.log('[spawnCrystal]', { level, type, pos: { r, c } }); } catch {}
         return { row: r, col: c };
     }
 
@@ -380,6 +513,17 @@ class BattleLogicModule {
         // Если прямо сейчас нет доступных сплитов, но есть отложенные удаления,
         // не завершаем поражением — после анимаций появятся свободные клетки
         if (!splittable) {
+            // Доп. защита: если на поле есть хотя бы один уровень 1,
+            // поражение не наступает — эти плитки будут автоматически удалены
+            let hasLevel1 = false;
+            for (let r = 0; r < 5 && !hasLevel1; r++) {
+                for (let c = 0; c < 5 && !hasLevel1; c++) {
+                    if (this.isExcludedCell(r, c)) continue;
+                    const crystal = this.board[r][c];
+                    if (crystal && crystal.level === 1) hasLevel1 = true;
+                }
+            }
+            if (hasLevel1) return { ended: false, result: null };
             if (this.pendingRemoval.length > 0) return { ended: false, result: null };
             return { ended: true, result: 'LOSE' };
         }
@@ -435,6 +579,35 @@ class BattleLogicModule {
         ctx.arc(0, 0, r, 0, Math.PI*2);
         ctx.fill();
         ctx.fillStyle='#000'; ctx.font='bold 20px Arial'; ctx.textAlign='center'; ctx.fillText(level.toString(),0,6); ctx.textAlign='left'; ctx.restore();
+    }
+
+    drawIgniteAnimation(ctx, animation, progress, boardPos) {
+        const { row, col, level } = animation;
+        const x = boardPos.boardX + col * boardPos.slotSize;
+        const y = boardPos.boardY + row * boardPos.slotSize;
+        const cx = x + boardPos.slotSize / 2;
+        const cy = y + boardPos.slotSize / 2;
+        const baseR = (boardPos.slotSize - 14) / 2;
+        const ringR = baseR * (0.7 + 0.6 * progress);
+        const alpha = 0.15 + 0.35 * (1 - Math.abs(2 * progress - 1));
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // Огненное кольцо
+        const grad = ctx.createRadialGradient(cx, cy, ringR * 0.6, cx, cy, ringR);
+        grad.addColorStop(0, '#ff8c00');
+        grad.addColorStop(1, '#ff4500');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.fill();
+        // Лёгкая вспышка уровня
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(level.toString(), cx, cy + 6);
+        ctx.textAlign = 'left';
+        ctx.restore();
     }
 
     drawCrystal(ctx, row, col, crystal, highlightedCrystal, boardPos) {
