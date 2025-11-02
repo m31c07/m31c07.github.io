@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>WebGL Планета единая система координат</title>
+<style>
+body { margin:0; overflow:hidden; background:#000; color:#fff; font-family:sans-serif; }
+#ui {
+  position:fixed; top:10px; left:10px; background:rgba(0,0,0,0.5);
+  padding:10px; border-radius:10px; font-size:14px;
+}
+label { display:block; margin:4px 0 2px; }
+input[type=range] { width:150px; }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<div id="ui">
+  <label>Скорость вращения</label>
+  <input id="speed" type="range" min="0.00001" max="0.0002" step="0.00001" value="0.00005">
+  <label>FPS лимит</label>
+  <input id="fps" type="range" min="10" max="120" step="10" value="60">
+  <label>Свет X</label>
+  <input id="lightX" type="range" min="-1" max="1" step="0.01" value="0.0">
+  <label>Свет Y</label>
+  <input id="lightY" type="range" min="-1" max="1" step="0.01" value="0.0">
+</div>
+
+<script>
+// === 1️⃣ WebGL setup ===
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+if(!gl) alert('WebGL не поддерживается');
+
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0,0,gl.drawingBufferWidth, gl.drawingBufferHeight);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// === 2️⃣ Шейдеры ===
+const vsSource = `
+attribute vec2 aPosition;
+varying vec2 vUv;
+void main(){
+  vUv = aPosition; // [-1,1] сразу
+  gl_Position = vec4(aPosition,0.0,1.0);
+}
+`;
+
+const fsSource = `
+precision mediump float;
+uniform float uTime;
+uniform sampler2D uTexture;
+uniform float uDistortion;
+uniform vec2 uLightPos;
+varying vec2 vUv;
+
+void main(){
+    vec2 uv = vUv; // [-1,1] 
+    float r2 = dot(uv, uv);
+
+    // --- жёсткое обрезание круга ---
+    if(r2 > 1.0) discard; // пиксели за пределами круга не рисуем
+
+    // --- синусоидальная деформация
+    float factor = sqrt(1.0 - uv.y*uv.y);
+    float u = fract((uv.x * pow(factor, -uDistortion) * 0.5 + 0.5 + uTime));
+    float v = uv.y * 0.5 + 0.5;
+
+    // --- текстура
+    vec4 color = texture2D(uTexture, vec2(u,v));
+
+    
+    // атмосфера
+    float r = sqrt(r2);
+    float atmosphere = smoothstep(1.05, 1.0, r);
+    vec3 atmosphereColor = vec3(0.5,0.7,1.0) * pow(atmosphere, 1.5);
+    float alphaFactor = pow(atmosphere, 0.0) * 0.4; // <1 → прозрачнее
+    color.rgb = mix(color.rgb, color.rgb + atmosphereColor, alphaFactor);
+
+
+    // --- освещение от точки
+    float dist = length(uv - uLightPos);
+    float lighting = 1.0 - smoothstep(0.0, 1.0, dist);
+    //color.rgb *= 0.2 + 0.8*lighting;
+    color.rgb *= 0.05+ 1.0*lighting;
+
+    // --- псевдо-освещение
+    color.rgb *= 0.3 + 0.7*factor;
+
+    // --- готовый цвет пикселя
+    gl_FragColor = color;
+
+}
+`;
+
+// === 3️⃣ Компиляция ===
+function compileShader(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
+if(!gl.getProgramParameter(program, gl.LINK_STATUS))
+  console.error(gl.getProgramInfoLog(program));
+gl.useProgram(program);
+
+// === 4️⃣ Геометрия ===
+const quad = new Float32Array([
+  -1,-1, 1,-1, -1,1,
+   1,-1, 1,1,  -1,1
+]);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+
+const posLoc = gl.getAttribLocation(program,'aPosition');
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false,0,0);
+
+// === 5️⃣ Текстура с биомами ===
+const texCanvas = document.createElement('canvas');
+texCanvas.width = 256;
+texCanvas.height = 256;
+const ctx = texCanvas.getContext('2d');
+
+// простая функция шума (сумма синусов с разной частотой и амплитудой)
+function fractalNoise(u, v){
+  let n = 0;
+  n += 0.5 * Math.sin(u * 2*Math.PI*1 + Math.sin(v*2*Math.PI*1));
+  n += 0.25 * Math.sin(u * 2*Math.PI*2 + Math.sin(v*2*Math.PI*2));
+  n += 0.125 * Math.sin(u * 2*Math.PI*4 + Math.sin(v*2*Math.PI*4));
+  return n*0.5 + 0.5; // нормализуем [0,1]
+}
+
+for(let y=0;y<256;y++){
+  for(let x=0;x<256;x++){
+    const u = x/256;
+    const v = y/256;
+
+    const n = fractalNoise(u,v);
+
+    let color;
+    if(n < 0.3) color = '#1a3b7c';       // вода
+    else if(n < 0.5) color = '#226622';  // лес
+    else if(n < 0.7) color = '#ccaa33';  // пустыня
+    else color = '#eeeeff';              // лед
+
+    ctx.fillStyle = color;
+    ctx.fillRect(x,y,1,1);
+  }
+}
+
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,texCanvas);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
+
+
+// === 6️⃣ Uniforms ===
+const uTimeLoc = gl.getUniformLocation(program,'uTime');
+const uTexLoc  = gl.getUniformLocation(program,'uTexture');
+const uDistLoc = gl.getUniformLocation(program,'uDistortion');
+const uLightLoc = gl.getUniformLocation(program,'uLightPos');
+gl.uniform1i(uTexLoc,0);
+gl.uniform1f(uDistLoc,1.0);
+
+// === 7️⃣ UI ===
+const ui = {
+  speed: document.getElementById('speed'),
+  fps: document.getElementById('fps'),
+  lightX: document.getElementById('lightX'),
+  lightY: document.getElementById('lightY')
+};
+
+// === 8️⃣ Анимация с лимитом FPS ===
+let start = performance.now();
+let lastFrame = 0;
+function animate(now){
+  requestAnimationFrame(animate);
+  const frameDur = 1000/parseFloat(ui.fps.value);
+  if(now-lastFrame<frameDur) return;
+  lastFrame = now;
+
+  const t = (now-start)*parseFloat(ui.speed.value);
+  gl.uniform1f(uTimeLoc,t);
+  gl.uniform2f(uLightLoc,parseFloat(ui.lightX.value),parseFloat(ui.lightY.value));
+
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES,0,6);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

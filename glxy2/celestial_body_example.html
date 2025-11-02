@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Celestial Body Renderer Example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid #333;
+            margin: 10px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            background: #333;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #555;
+        }
+        .info {
+            margin: 10px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Celestial Body Renderer Test</h1>
+    <div class="info">
+        <p>Testing the CelestialBodyRenderer with different planet types and sinusoidal texture distortion.</p>
+    </div>
+    
+    <div class="controls">
+        <button onclick="changePlanetType('rocky')">Rocky Planet</button>
+        <button onclick="changePlanetType('terran')">Terran Planet</button>
+        <button onclick="changePlanetType('gas')">Gas Giant</button>
+        <button onclick="changePlanetType('ice')">Ice Planet</button>
+        <button onclick="changePlanetType('lava')">Lava Planet</button>
+        <button onclick="changePlanetType('desert')">Desert Planet</button>
+        <button onclick="changePlanetType('ocean')">Ocean Planet</button>
+    </div>
+    
+    <canvas id="celestialCanvas" width="512" height="512"></canvas>
+    
+    <div class="info">
+        <p>Current Planet Type: <span id="currentType">rocky</span></p>
+        <p>Features: Sinusoidal texture distortion, atmosphere effects, dynamic lighting</p>
+    </div>
+
+    <script type="module">
+        import CelestialBodyRenderer from './src/renderers/CelestialBodyRenderer.js';
+        
+        const canvas = document.getElementById('celestialCanvas');
+        const gl = canvas.getContext('webgl');
+        
+        if (!gl) {
+            alert('WebGL not supported');
+            throw new Error('WebGL not supported');
+        }
+        
+        const renderer = new CelestialBodyRenderer(gl);
+        let currentPlanetType = 'rocky';
+        
+        // Предварительно генерируем текстуры для всех типов планет
+        const planetTypes = ['rocky', 'terran', 'gas', 'ice', 'lava', 'desert', 'ocean'];
+        const preloadedTextures = new Map();
+        
+        console.log('Preloading textures...');
+        
+        // Функция для предварительной загрузки текстур
+        async function preloadTextures() {
+            for (const type of planetTypes) {
+                const celestialBody = {
+                    starX: 100,
+                    starY: 200,
+                    planetIndex: 0,
+                    type: type,
+                    size: 8,
+                    color: getPlanetColor(type)
+                };
+                
+                // Генерируем текстуру заранее
+                const texture = renderer.getCelestialBodyTexture(celestialBody);
+                preloadedTextures.set(type, texture);
+                
+                // Небольшая задержка между генерациями, чтобы не блокировать UI
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            console.log('All textures preloaded!');
+        }
+        
+        // Test celestial body data
+        let celestialBody = {
+            starX: 100,
+            starY: 200,
+            planetIndex: 0,
+            type: currentPlanetType,
+            size: 8,
+            color: getPlanetColor(currentPlanetType),
+            lightPos: [0.3, 0.3], // Улучшенная позиция света
+            atmosphereIntensity: 0.3, // Уменьшенная интенсивность атмосферы
+            radius: 0.7 // Немного меньший радиус для лучшей видимости
+        };
+        
+        function getPlanetColor(type) {
+            const colors = {
+                rocky: '#996633',
+                terran: '#2277ff',
+                gas: '#ffdd88',
+                ice: '#aaddff',
+                lava: '#ff3300',
+                desert: '#e6b84d',
+                ocean: '#0066cc'
+            };
+            return colors[type] || '#996633';
+        }
+        
+        // Animation loop
+        let startTime = Date.now();
+        let isAnimating = false;
+        
+        function animate() {
+            if (isAnimating) return; // Предотвращаем множественные вызовы
+            isAnimating = true;
+            
+            const currentTime = (Date.now() - startTime) / 1000;
+            
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(0.0, 0.0, 0.1, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            
+            try {
+                renderer.render(celestialBody, currentTime);
+            } catch (error) {
+                console.error('Render error:', error);
+            }
+            
+            isAnimating = false;
+            requestAnimationFrame(animate);
+        }
+        
+        // Global function for button controls
+        window.changePlanetType = function(type) {
+            console.log(`Changing planet type from ${currentPlanetType} to ${type}`);
+            currentPlanetType = type;
+            celestialBody.type = type;
+            celestialBody.color = getPlanetColor(type);
+            document.getElementById('currentType').textContent = type;
+            console.log('Planet type changed successfully');
+        };
+        
+        // Запускаем предварительную загрузку текстур, затем анимацию
+        preloadTextures().then(() => {
+            animate();
+            console.log('Celestial Body Renderer initialized successfully');
+        });
+    </script>
+</body>
+</html>
