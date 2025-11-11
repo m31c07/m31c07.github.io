@@ -5,12 +5,22 @@ import { ProceduralPlanetTexture } from './src/utils/proceduralTextures.js';
 // Types available in generator
 const PLANET_TYPES = ['lava','rocky','terran','gas','ice','desert','ocean','toxic','crystal','volcanic'];
 
-// Слайдеры только для поддерживаемых параметров генератора
-const PARAM_CONFIG = {
-  waterLevel: { label: 'Уровень воды', min: -1.0, max: 1.0, step: 0.01 },
-  polarCapSize: { label: 'Размер полярных шапок', min: 0.0, max: 0.4, step: 0.01 },
-  overallNoiseScale: { label: 'Масштаб шума', min: 0.5, max: 6.0, step: 0.1 }
-};
+// Слайдеры, актуализированные под параметры ProceduralPlanetTexture
+// Поддерживаются: waterLevel, polarCapSize и relief.*
+const PARAM_CONFIG = [
+  { key: 'waterLevel', label: 'Уровень воды', min: -1.0, max: 1.0, step: 0.01, path: ['waterLevel'] },
+  { key: 'polarCapSize', label: 'Размер полярных шапок', min: 0.0, max: 0.5, step: 0.01, path: ['polarCapSize'] },
+  { group: 'Континенты' },
+  { key: 'continentsFreq', label: 'Частота континентов', min: 0.3, max: 1.2, step: 0.05, path: ['relief','continentsFreq'] },
+  { key: 'continentsGain', label: 'Затухание континентов', min: 0.3, max: 0.8, step: 0.01, path: ['relief','continentsGain'] },
+  { key: 'continentsOctaves', label: 'Октавы континентов', min: 1, max: 6, step: 1, integer: true, path: ['relief','continentsOctaves'] },
+  { group: 'Горы' },
+  { key: 'mountainFreq', label: 'Частота гор', min: 1.0, max: 4.0, step: 0.1, path: ['relief','mountainFreq'] },
+  { key: 'mountainGain', label: 'Затухание гор', min: 0.4, max: 0.8, step: 0.01, path: ['relief','mountainGain'] },
+  { key: 'mountainOctaves', label: 'Октавы гор', min: 1, max: 5, step: 1, integer: true, path: ['relief','mountainOctaves'] },
+  { group: 'Развитие' },
+  { key: 'developmentLevel', label: 'Уровень урбанизации', min: 0.0, max: 1.0, step: 0.01, path: ['developmentLevel'] },
+];
 
 // DOM refs
 const canvas = document.getElementById('labCanvas');
@@ -19,8 +29,8 @@ const paramSlidersEl = document.getElementById('paramSliders');
 const textureSizeEl = document.getElementById('textureSize');
 const rotationSpeedEl = document.getElementById('rotationSpeed');
 const rotationSpeedInputEl = document.getElementById('rotationSpeedInput');
-const devLevelEl = document.getElementById('developmentLevel');
-const devLevelInputEl = document.getElementById('developmentLevelInput');
+const atmosphereHueEl = document.getElementById('atmosphereHue');
+const atmosphereHueInputEl = document.getElementById('atmosphereHueInput');
 
 // Renderer setup
 const renderer = new WebGLRenderer(canvas);
@@ -42,9 +52,10 @@ let params = null;
 let textureSize = parseInt(textureSizeEl.value, 10);
 let rotationOffset = 0;
 let rotationSpeed = parseFloat(rotationSpeedEl.value);
-let developmentLevel = devLevelEl ? parseFloat(devLevelEl.value) : 0.0;
-let atmosphereColor = hexToRgbArray(getPlanetColor(planetType));
+let atmosphereHue = parseFloat(atmosphereHueEl.value);
+let atmosphereColor = [...hueToRGB(atmosphereHue), 1];
 let textureCanvas = null;
+let developmentLevel = 0.0;
 
 // Utility to get default params for type
 function getDefaultParams(type, size) {
@@ -65,8 +76,14 @@ function buildTypeButtons() {
       [...typeButtonsEl.children].forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       params = getDefaultParams(planetType, textureSize);
-      // Цвет ореола атмосферы на основе типа планеты
-      atmosphereColor = hexToRgbArray(getPlanetColor(planetType));
+      // Set atmosphere color based on mapped planet color
+      const mapped = getPlanetColor(planetType);
+      atmosphereColor = [...mapped, 1];
+      // Sync hue slider display to mapped color
+      const mappedHue = rgbToHue(mapped[0], mapped[1], mapped[2]);
+      atmosphereHue = mappedHue;
+      atmosphereHueEl.value = Math.round(mappedHue);
+      atmosphereHueInputEl.value = Math.round(mappedHue);
       buildParamSliders();
       regenerateTexture();
     });
@@ -77,22 +94,29 @@ function buildTypeButtons() {
 // Build sliders for current params
 function buildParamSliders() {
   paramSlidersEl.innerHTML = '';
-  Object.keys(PARAM_CONFIG).forEach(key => {
-    const cfg = PARAM_CONFIG[key];
+  PARAM_CONFIG.forEach(cfg => {
+    if (cfg.group) {
+      const title = document.createElement('div');
+      title.className = 'param-group-title';
+      title.textContent = cfg.group;
+      paramSlidersEl.appendChild(title);
+      return;
+    }
+
     const row = document.createElement('div');
     row.className = 'control-row';
 
     const label = document.createElement('label');
-    label.textContent = cfg.label || key;
-    label.setAttribute('for', `param-${key}`);
+    label.textContent = cfg.label || cfg.key;
+    label.setAttribute('for', `param-${cfg.key}`);
 
     const input = document.createElement('input');
     input.type = 'range';
-    input.id = `param-${key}`;
+    input.id = `param-${cfg.key}`;
     input.min = cfg.min;
     input.max = cfg.max;
     input.step = cfg.step;
-    const initial = params[key];
+    const initial = getParamByPath(cfg.path);
     input.value = initial;
 
     const num = document.createElement('input');
@@ -104,14 +128,14 @@ function buildParamSliders() {
 
     input.addEventListener('input', () => {
       const v = cfg.integer ? parseInt(input.value, 10) : parseFloat(input.value);
-      params[key] = v;
+      setParamByPath(cfg.path, v);
       num.value = formatValue(v, cfg);
       regenerateTexture();
     });
 
     num.addEventListener('input', () => {
       const v = cfg.integer ? parseInt(num.value, 10) : parseFloat(num.value);
-      params[key] = v;
+      setParamByPath(cfg.path, v);
       input.value = String(v);
       regenerateTexture();
     });
@@ -121,6 +145,32 @@ function buildParamSliders() {
     row.appendChild(num);
     paramSlidersEl.appendChild(row);
   });
+}
+
+function getParamByPath(path) {
+  if (!path || !path.length) return undefined;
+  if (path[0] === 'developmentLevel') return developmentLevel;
+  let obj = params;
+  for (const key of path) {
+    obj = obj?.[key];
+    if (obj === undefined) break;
+  }
+  return obj;
+}
+
+function setParamByPath(path, value) {
+  if (!path || !path.length) return;
+  if (path[0] === 'developmentLevel') {
+    developmentLevel = value;
+    return;
+  }
+  let obj = params;
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    if (!obj[key] || typeof obj[key] !== 'object') obj[key] = {};
+    obj = obj[key];
+  }
+  obj[path[path.length - 1]] = value;
 }
 
 function formatValue(v, cfg) {
@@ -133,7 +183,7 @@ function regenerateTexture() {
   const gen = new ProceduralPlanetTexture(0.123, 0.456, 0, planetType, textureSize, 0, developmentLevel);
   gen.typeParams = { ...params };
   textureCanvas = gen.generateTexture();
-  // Текстура статична между регенерациями
+  // Hint to WebGLRenderer: texture content is static between regenerations
   textureCanvas._isStaticTexture = true;
   renderScene();
 }
@@ -155,7 +205,12 @@ function renderScene() {
     pointSize,
     color: atmosphereColor,
     texture: textureCanvas,
-    rotationOffset
+    rotationOffset,
+    // City lights appearance
+    cityLightsColor: [1.0, 0.85, 0.6],      // warm night lights
+    cityLightIntensity: 1.0,                // emissive power at night
+    cityDayColor: [0.75, 0.75, 0.78],       // metallic gray tint for day side
+    cityDayIntensity: 0.25                  // subtle tint strength on day side
   });
 
   renderer.render(scene);
@@ -189,35 +244,76 @@ rotationSpeedInputEl.addEventListener('input', () => {
   rotationSpeedEl.value = rotationSpeed;
 });
 
-if (devLevelEl && devLevelInputEl) {
-  devLevelEl.addEventListener('input', () => {
-    developmentLevel = parseFloat(devLevelEl.value);
-    devLevelInputEl.value = developmentLevel.toFixed(2);
-    regenerateTexture();
-  });
-  devLevelInputEl.addEventListener('input', () => {
-    developmentLevel = parseFloat(devLevelInputEl.value);
-    devLevelEl.value = developmentLevel;
-    regenerateTexture();
-  });
-}
+atmosphereHueEl.addEventListener('input', () => {
+  atmosphereHue = parseFloat(atmosphereHueEl.value);
+  atmosphereColor = [...hueToRGB(atmosphereHue), 1];
+  atmosphereHueInputEl.value = Math.round(atmosphereHue);
+  renderScene();
+});
+
+atmosphereHueInputEl.addEventListener('input', () => {
+  atmosphereHue = parseFloat(atmosphereHueInputEl.value);
+  atmosphereColor = [...hueToRGB(atmosphereHue), 1];
+  atmosphereHueEl.value = atmosphereHue;
+  renderScene();
+});
 
 // Init
 params = getDefaultParams(planetType, textureSize);
 buildTypeButtons();
 buildParamSliders();
-// Инициализация цвета атмосферы по типу планеты
-atmosphereColor = hexToRgbArray(getPlanetColor(planetType));
+// Initialize atmosphere color from planet type mapping and sync hue slider
+{
+  const mapped = getPlanetColor(planetType);
+  atmosphereColor = [...mapped, 1];
+  const mappedHue = rgbToHue(mapped[0], mapped[1], mapped[2]);
+  atmosphereHue = mappedHue;
+  const mappedHueRounded = Math.round(mappedHue);
+  atmosphereHueEl.value = mappedHueRounded;
+  atmosphereHueInputEl.value = mappedHueRounded;
+}
 regenerateTexture();
 requestAnimationFrame(tick);
 
 // Utils
-function hexToRgbArray(hex) {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.substring(0, 2), 16) / 255;
-  const g = parseInt(h.substring(2, 4), 16) / 255;
-  const b = parseInt(h.substring(4, 6), 16) / 255;
-  return [r, g, b, 1];
+function hueToRGB(h) {
+  const s = 0.85; // saturation
+  const v = 0.9;  // value
+  const c = v * s;
+  const hh = (h % 360) / 60;
+  const x = c * (1 - Math.abs(hh % 2 - 1));
+  let r1 = 0, g1 = 0, b1 = 0;
+  if (0 <= hh && hh < 1) { r1 = c; g1 = x; b1 = 0; }
+  else if (1 <= hh && hh < 2) { r1 = x; g1 = c; b1 = 0; }
+  else if (2 <= hh && hh < 3) { r1 = 0; g1 = c; b1 = x; }
+  else if (3 <= hh && hh < 4) { r1 = 0; g1 = x; b1 = c; }
+  else if (4 <= hh && hh < 5) { r1 = x; g1 = 0; b1 = c; }
+  else { r1 = c; g1 = 0; b1 = x; }
+  const m = v - c;
+  return [r1 + m, g1 + m, b1 + m];
+}
+
+function rgbToHue(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d === 0) h = 0;
+  else if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return h;
+}
+
+function hexToRgb01(hex) {
+  const h = hex.replace('#','');
+  if (h.length !== 6) return [1,1,1];
+  const r = parseInt(h.slice(0,2), 16);
+  const g = parseInt(h.slice(2,4), 16);
+  const b = parseInt(h.slice(4,6), 16);
+  return [r/255, g/255, b/255];
 }
 
 function getPlanetColor(type) {
@@ -227,12 +323,13 @@ function getPlanetColor(type) {
     terran: ['#0066cc', '#0088ee', '#0055aa'],
     gas: ['#ffdd88', '#eecc99', '#ffcc66'],
     ice: ['#aaddff', '#cceeff', '#ddeeff'],
-    desert: ['#e6b84d', '#d4a24a', '#c49247'], // Песочные оттенки
-    ocean: ['#0066cc', '#0088ee', '#0055aa'], // Глубокие синие тона
-    toxic: ['#66ff33', '#88ee44', '#55cc22'], // Ядовито-зеленые цвета
-    crystal: ['#cc88ff', '#aa66dd', '#9955cc'], // Кристаллические фиолетовые
-    volcanic: ['#ff6600', '#ee5500', '#dd4400'] // Оранжево-красные вулканы
+    desert: ['#e6b84d', '#d4a24a', '#c49247'],
+    ocean: ['#0066cc', '#0088ee', '#0055aa'],
+    toxic: ['#66ff33', '#88ee44', '#55cc22'],
+    crystal: ['#cc88ff', '#aa66dd', '#9955cc'],
+    volcanic: ['#ff6600', '#ee5500', '#dd4400']
   };
   const palette = colors[type] || colors.rocky;
-  return palette[Math.floor(Math.random() * palette.length)];
+  const hex = palette[Math.floor(Math.random() * palette.length)];
+  return hexToRgb01(hex);
 }

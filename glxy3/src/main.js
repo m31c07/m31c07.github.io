@@ -31,13 +31,32 @@ function clearUI() {
   document.querySelectorAll('button').forEach(b => b.remove());
 }
 
-function setGalaxyCamMiddle() {
+function setGalaxyCamMiddle(focusStar = null) {
+    const scale = gameConfig.ui.galaxyCamera.scale || 1;
+
+    // If a specific star is provided, center on it
+    if (focusStar && typeof focusStar.x === 'number' && typeof focusStar.y === 'number') {
+        gameConfig.ui.galaxyCamera.offsetX = window.innerWidth/2 - focusStar.x * scale;
+        gameConfig.ui.galaxyCamera.offsetY = window.innerHeight/2 - focusStar.y * scale;
+        return;
+    }
+
+    // If we have a remembered current star id, try centering on it
+    if (gameConfig.ui.currentStarId !== null) {
+        const currentStar = stars[gameConfig.ui.currentStarId];
+        if (currentStar) {
+            gameConfig.ui.galaxyCamera.offsetX = window.innerWidth/2 - currentStar.x * scale;
+            gameConfig.ui.galaxyCamera.offsetY = window.innerHeight/2 - currentStar.y * scale;
+            return;
+        }
+    }
+
     // Center camera on player's starting system if available and exists
     if (gameConfig.player.startingSystemId !== null) {
         const playerStar = stars[gameConfig.player.startingSystemId];
         if (playerStar) {
-            gameConfig.ui.galaxyCamera.offsetX = window.innerWidth/2 - playerStar.x * gameConfig.ui.galaxyCamera.scale;
-            gameConfig.ui.galaxyCamera.offsetY = window.innerHeight/2 - playerStar.y * gameConfig.ui.galaxyCamera.scale;
+            gameConfig.ui.galaxyCamera.offsetX = window.innerWidth/2 - playerStar.x * scale;
+            gameConfig.ui.galaxyCamera.offsetY = window.innerHeight/2 - playerStar.y * scale;
             return;
         }
     }
@@ -45,7 +64,6 @@ function setGalaxyCamMiddle() {
     // Fallback to galaxy center - ensure we have valid mapSize
     const mapWidth = gameConfig.galaxy.mapSize?.width || 1000;
     const mapHeight = gameConfig.galaxy.mapSize?.height || 1000;
-    const scale = gameConfig.ui.galaxyCamera.scale || 1;
     
     gameConfig.ui.galaxyCamera.offsetX = window.innerWidth/2 - mapWidth/2 * scale;
     gameConfig.ui.galaxyCamera.offsetY = window.innerHeight/2 - mapHeight/2 * scale;
@@ -84,7 +102,7 @@ function cleanupAllRenders() {
   if (stopMoonRender) { stopMoonRender(); stopMoonRender = null; }
 }
 
-function showGalaxy() {
+function showGalaxy(focusStar = null) {
   clearUI();
   gameConfig.ui.currentView = 'galaxy';
   gameConfig.ui.currentStarId = null;
@@ -111,7 +129,7 @@ function showGalaxy() {
     console.error('Error clearing canvas:', e);
   }
   
-  setGalaxyCamMiddle();
+  setGalaxyCamMiddle(focusStar);
   
   const galaxyRenderResult = renderGalaxy(canvas, stars, explorationSystem, fleetManager, showStarSystem);
   if (typeof galaxyRenderResult === 'function') {
@@ -135,8 +153,14 @@ function showStarSystem(star) {
   // Update breadcrumbs: Galaxy > Star
   updateBreadcrumbs({
     star,
-    onGalaxy: () => showGalaxy(),
-    onStar: () => showStarSystem(star)
+    onGalaxy: () => showGalaxy(star),
+    onStar: () => showStarSystem(star),
+    // Allow selecting planets from star dropdown
+    onPlanetIndex: (pIndex) => {
+      const p = star?.planets?.planets?.[pIndex];
+      if (!p) return;
+      showPlanet(star, p, pIndex);
+    }
   });
   initSpeedControls();
 
@@ -153,11 +177,12 @@ function showStarSystem(star) {
     console.error('Error clearing canvas:', e);
   }
   
+  const returnToGalaxy = () => showGalaxy(star);
   stopSystemRender = renderStarSystem(
     canvas,
     star,
     explorationSystem,
-    showGalaxy,
+    returnToGalaxy,
     // onPlanetClick
     (planet, planetIndex) => showPlanet(star, planet, planetIndex),
     // onMoonClick
@@ -177,9 +202,21 @@ function showPlanet(star, planet, planetIndex) {
   updateBreadcrumbs({
     star,
     planetIndex,
-    onGalaxy: () => showGalaxy(),
+    onGalaxy: () => showGalaxy(star),
     onStar: () => showStarSystem(star),
-    onPlanet: () => showPlanet(star, planet, planetIndex)
+    onPlanet: () => showPlanet(star, planet, planetIndex),
+    // Allow selecting planets from star dropdown
+    onPlanetIndex: (pIndex) => {
+      const p = star?.planets?.planets?.[pIndex];
+      if (!p) return;
+      showPlanet(star, p, pIndex);
+    },
+    // Allow selecting moons from planet dropdown
+    onMoonIndex: (mIndex) => {
+      const m = planet?.moons?.[mIndex];
+      if (!m) return;
+      showSatellite(star, planet, planetIndex, m, mIndex);
+    }
   });
   initSpeedControls();
 
@@ -191,7 +228,7 @@ function showPlanet(star, planet, planetIndex) {
     planet,
     planetIndex, // Передаем planetIndex
     // onGalaxy
-    () => showGalaxy(),
+    () => showGalaxy(star),
     // onSystem
     () => showStarSystem(star),
     // onPlanet self
@@ -214,10 +251,22 @@ function showSatellite(star, planet, planetIndex, moon, moonIndex) {
     star,
     planetIndex,
     moonIndex,
-    onGalaxy: () => showGalaxy(),
+    onGalaxy: () => showGalaxy(star),
     onStar: () => showStarSystem(star),
     onPlanet: () => showPlanet(star, planet, planetIndex),
-    onMoon: () => showSatellite(star, planet, planetIndex, moon, moonIndex)
+    onMoon: () => showSatellite(star, planet, planetIndex, moon, moonIndex),
+    // Allow selecting planets from star dropdown
+    onPlanetIndex: (pIndex) => {
+      const p = star?.planets?.planets?.[pIndex];
+      if (!p) return;
+      showPlanet(star, p, pIndex);
+    },
+    // Allow selecting moons from planet dropdown
+    onMoonIndex: (mIndex) => {
+      const m = planet?.moons?.[mIndex];
+      if (!m) return;
+      showSatellite(star, planet, planetIndex, m, mIndex);
+    }
   });
   initSpeedControls();
 
@@ -231,7 +280,7 @@ function showSatellite(star, planet, planetIndex, moon, moonIndex) {
     moon,
     moonIndex, // Передаем moonIndex
     // onGalaxy
-    () => showGalaxy(),
+    () => showGalaxy(star),
     // onSystem
     () => showStarSystem(star),
     // onPlanet

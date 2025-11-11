@@ -1,6 +1,17 @@
 // src/ui/Breadcrumbs.js
 import { gameConfig } from '../config/gameConfig.js';
 
+// Simple dropdown state to avoid multiple open menus
+let currentDropdown = null;
+let outsideClickHandlerAttached = false;
+
+function closeDropdown() {
+  if (currentDropdown && currentDropdown.parentNode) {
+    try { currentDropdown.parentNode.removeChild(currentDropdown); } catch {}
+  }
+  currentDropdown = null;
+}
+
 function ensureContainer() {
   let el = document.getElementById('breadcrumbs-bar');
   if (!el) {
@@ -23,12 +34,26 @@ function ensureContainer() {
     el.style.display = 'inline-flex';
     el.style.alignItems = 'center';
     el.style.gap = '6px';
+    el.style.userSelect = 'none';
+    // Make absolute children position relative to container
+    el.style.position = 'fixed';
     document.body.appendChild(el);
+  }
+
+  if (!outsideClickHandlerAttached) {
+    document.addEventListener('click', (e) => {
+      const container = document.getElementById('breadcrumbs-bar');
+      if (!container) return;
+      if (!container.contains(e.target)) {
+        closeDropdown();
+      }
+    });
+    outsideClickHandlerAttached = true;
   }
   return el;
 }
 
-function createSegment(label, onClick, isLast) {
+function createSegment(label, onClick, isLast, dropdownItems) {
   const span = document.createElement('span');
   span.textContent = label;
   span.style.display = 'inline-block';
@@ -36,7 +61,26 @@ function createSegment(label, onClick, isLast) {
   span.style.whiteSpace = 'nowrap';
   span.style.textOverflow = 'ellipsis';
   span.style.overflow = 'hidden';
-  if (typeof onClick === 'function') {
+  const hasDropdown = Array.isArray(dropdownItems) && dropdownItems.length > 0;
+  if (hasDropdown) {
+    span.style.cursor = 'pointer';
+    span.style.color = '#a9d4ff';
+    span.title = 'Открыть список';
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const container = ensureContainer();
+      // Toggle
+      if (currentDropdown && currentDropdown._anchor === span) {
+        closeDropdown();
+        return;
+      }
+      closeDropdown();
+      const dd = createDropdown(span, dropdownItems);
+      container.appendChild(dd);
+      currentDropdown = dd;
+      currentDropdown._anchor = span;
+    });
+  } else if (typeof onClick === 'function') {
     span.style.cursor = 'pointer';
     span.style.color = isLast ? '#ffffff' : '#a9d4ff';
     span.addEventListener('click', (e) => {
@@ -57,6 +101,45 @@ function createSeparator() {
   return sep;
 }
 
+function createDropdown(anchorEl, items) {
+  const container = ensureContainer();
+  const dd = document.createElement('div');
+  dd.style.position = 'absolute';
+  dd.style.top = `${container.offsetHeight + 6}px`;
+  dd.style.left = `${anchorEl.offsetLeft}px`;
+  dd.style.minWidth = '180px';
+  dd.style.maxWidth = '60vw';
+  dd.style.background = 'rgba(20, 24, 28, 0.95)';
+  dd.style.border = '1px solid rgba(120,130,140,0.35)';
+  dd.style.borderRadius = '8px';
+  dd.style.boxShadow = '0 6px 16px rgba(0,0,0,0.45)';
+  dd.style.padding = '6px';
+  dd.style.zIndex = '10001';
+  dd.style.backdropFilter = 'blur(2px)';
+
+  items.forEach(({ label, onClick }) => {
+    const item = document.createElement('div');
+    item.textContent = label;
+    item.style.padding = '6px 10px';
+    item.style.cursor = 'pointer';
+    item.style.borderRadius = '6px';
+    item.style.color = '#e9eef4';
+    item.style.whiteSpace = 'nowrap';
+    item.style.textOverflow = 'ellipsis';
+    item.style.overflow = 'hidden';
+    item.addEventListener('mouseenter', () => { item.style.background = 'rgba(60, 80, 105, 0.35)'; });
+    item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeDropdown();
+      try { onClick?.(); } catch (err) { console.error('Dropdown click error:', err); }
+    });
+    dd.appendChild(item);
+  });
+
+  return dd;
+}
+
 export function updateBreadcrumbs({
   star = null,
   planetIndex = null,
@@ -65,10 +148,15 @@ export function updateBreadcrumbs({
   onStar = null,
   onPlanet = null,
   onMoon = null,
+  // Extended handlers for selection from dropdowns
+  onPlanetIndex = null,
+  onMoonIndex = null,
 } = {}) {
   const container = ensureContainer();
   // Clear previous content
   container.innerHTML = '';
+  // Close any open dropdown when rerendering
+  closeDropdown();
   const args = { star, planetIndex, moonIndex, onGalaxy, onStar, onPlanet, onMoon };
 
   const segments = [];
@@ -77,12 +165,36 @@ export function updateBreadcrumbs({
 
   if (star) {
     const starLabel = star.name || (gameConfig?.exploration?.unexploredSystemName || 'Система');
-    segments.push({ label: starLabel, onClick: onStar });
+    // Build dropdown of planets for star segment if available
+    const planetList = Array.isArray(star?.planets?.planets) ? star.planets.planets : [];
+    const starDropdown = planetList.map((p, idx) => ({
+      label: p?.name || `Планета ${idx + 1}`,
+      onClick: () => {
+        if (typeof onPlanetIndex === 'function') {
+          try { onPlanetIndex(idx); } catch (err) { console.error('onPlanetIndex error:', err); }
+        } else if (typeof onPlanet === 'function') {
+          try { onPlanet(); } catch (err) { console.error('onPlanet error:', err); }
+        }
+      }
+    }));
+    segments.push({ label: starLabel, onClick: onStar, dropdownItems: starDropdown });
 
     if (planetIndex !== null && planetIndex !== undefined) {
       const planet = star?.planets?.planets?.[planetIndex];
       const planetLabel = planet?.name || `Планета ${Number(planetIndex) + 1}`;
-      segments.push({ label: planetLabel, onClick: onPlanet });
+      // Build dropdown of moons for planet segment if available
+      const moonList = Array.isArray(planet?.moons) ? planet.moons : [];
+      const planetDropdown = moonList.map((m, idx) => ({
+        label: m?.name || `Луна ${idx + 1}`,
+        onClick: () => {
+          if (typeof onMoonIndex === 'function') {
+            try { onMoonIndex(idx); } catch (err) { console.error('onMoonIndex error:', err); }
+          } else if (typeof onMoon === 'function') {
+            try { onMoon(); } catch (err) { console.error('onMoon error:', err); }
+          }
+        }
+      }));
+      segments.push({ label: planetLabel, onClick: onPlanet, dropdownItems: planetDropdown });
 
       if (moonIndex !== null && moonIndex !== undefined) {
         const moon = planet?.moons?.[moonIndex];
@@ -95,7 +207,7 @@ export function updateBreadcrumbs({
   // Render segments with separators
   segments.forEach((seg, idx) => {
     const isLast = idx === segments.length - 1;
-    container.appendChild(createSegment(seg.label, seg.onClick, isLast));
+    container.appendChild(createSegment(seg.label, seg.onClick, isLast, seg.dropdownItems));
     if (!isLast) container.appendChild(createSeparator());
   });
 }

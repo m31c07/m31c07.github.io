@@ -71,6 +71,9 @@ export default class WebGLRenderer {
     // Кэш текстур для Canvas, чтобы не создавать новую текстуру каждый кадр
     this.canvasTextureCache = new Map();
     this.canvasTextureList = new Set();
+    // Кэш текстур маски городов (урбанизация), ключ — исходный canvas текстуры планеты
+    this.cityMaskTextureCache = new Map();
+    this.cityMaskTextureList = new Set();
     
     this.initBasicShaders();
   }
@@ -262,6 +265,14 @@ const fsSource = `
   uniform bool uUseTexture;
   uniform float uRotationOffset;
   uniform float uPlanetEdge;
+  // City lights visualization
+  uniform bool uHasCityMask;
+  uniform sampler2D uCityMask;
+  uniform vec3 uCityColor;
+  uniform float uCityIntensity;
+  // Daytime city tint
+  uniform vec3 uCityDayColor;
+  uniform float uCityDayIntensity;
   
   varying vec2 vLightDirection;
   
@@ -304,9 +315,22 @@ const fsSource = `
       vec3 surfaceNormal = normalize(vec3(pScaled.x, pScaled.y, z));
       vec3 lightDir3D = normalize(vec3(lightRot.x, lightRot.y, 0.3));
       float lightAngle = dot(surfaceNormal, lightDir3D);
-      float shading = 0.3 + 0.7 * max(0.0, lightAngle);
+      float shading = 0.1 + 0.7 * max(0.0, lightAngle);
       
       finalColor = textureColor * shading;
+      // Night-side city lights emission and day-side metallic tint
+      if (uHasCityMask) {
+        // Day mask transitions from 0 (night) to 1 (day) near the terminator
+        float dayMask = smoothstep(0.0, 0.2, lightAngle);
+        float nightMask = 1.0 - dayMask;
+        float city = texture2D(uCityMask, sphericalTexCoord).r;
+        // Emissive contribution at night
+        float emissive = city * nightMask * uCityIntensity;
+        finalColor += uCityColor * emissive;
+        // Subtle metallic gray tint on the day side
+        float dayTint = city * dayMask * uCityDayIntensity;
+        finalColor = mix(finalColor, uCityDayColor, clamp(dayTint, 0.0, 1.0));
+      }
       finalAlpha = uColor.a;
     } else {
       // Outer rim halo occupying sprite margin [uPlanetEdge, 1.0]
@@ -611,6 +635,40 @@ const fsSource = `
             this.gl.bindTexture(this.gl.TEXTURE_2D, this.createTextureFromCanvas(object.texture));
             this.gl.uniform1i(textureLoc, 0);
           }
+          // Bind optional city mask texture for night-side lights
+          const hasCityMask = !!object.texture._cityMask;
+          const hasCityMaskLoc = this.gl.getUniformLocation(program, 'uHasCityMask');
+          if (hasCityMaskLoc) {
+            this.gl.uniform1i(hasCityMaskLoc, hasCityMask ? 1 : 0);
+          }
+          if (hasCityMask) {
+            const cityMaskLoc = this.gl.getUniformLocation(program, 'uCityMask');
+            if (cityMaskLoc) {
+              this.gl.activeTexture(this.gl.TEXTURE1);
+              this.gl.bindTexture(this.gl.TEXTURE_2D, this.createCityMaskTextureFromCanvas(object.texture));
+              this.gl.uniform1i(cityMaskLoc, 1);
+            }
+            const cityColorLoc = this.gl.getUniformLocation(program, 'uCityColor');
+            const cityIntensityLoc = this.gl.getUniformLocation(program, 'uCityIntensity');
+            const cityDayColorLoc = this.gl.getUniformLocation(program, 'uCityDayColor');
+            const cityDayIntensityLoc = this.gl.getUniformLocation(program, 'uCityDayIntensity');
+            if (cityColorLoc) {
+              const color = object.cityLightsColor || [1.0, 0.85, 0.6]; // warm yellowish
+              this.gl.uniform3fv(cityColorLoc, new Float32Array(color));
+            }
+            if (cityIntensityLoc) {
+              const intensity = (object.cityLightIntensity !== undefined) ? object.cityLightIntensity : 1.0;
+              this.gl.uniform1f(cityIntensityLoc, intensity);
+            }
+            if (cityDayColorLoc) {
+              const dayColor = object.cityDayColor || [0.75, 0.75, 0.78]; // metallic gray
+              this.gl.uniform3fv(cityDayColorLoc, new Float32Array(dayColor));
+            }
+            if (cityDayIntensityLoc) {
+              const dayIntensity = (object.cityDayIntensity !== undefined) ? object.cityDayIntensity : 0.25;
+              this.gl.uniform1f(cityDayIntensityLoc, dayIntensity);
+            }
+          }
         }
         
         // Set color uniform (used as fallback or tint)
@@ -746,6 +804,31 @@ const fsSource = `
     return texture;
   }
   
+  // Create or update a luminance texture from canvas._cityMask (Uint8Array)
+  createCityMaskTextureFromCanvas(canvas) {
+    const data = canvas && canvas._cityMask;
+    if (!canvas || !data) return null;
+    let texture = this.cityMaskTextureCache.get(canvas);
+    if (!texture) {
+      texture = this.gl.createTexture();
+      this.cityMaskTextureCache.set(canvas, texture);
+      this.cityMaskTextureList.add(texture);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+      this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.LUMINANCE, canvas.width, canvas.height, 0, this.gl.LUMINANCE, this.gl.UNSIGNED_BYTE, data);
+    } else {
+      this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+      // City mask is static per canvas; reupload only if canvas indicates dynamic
+      if (!canvas._isStaticTexture) {
+        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.LUMINANCE, canvas.width, canvas.height, 0, this.gl.LUMINANCE, this.gl.UNSIGNED_BYTE, data);
+      }
+    }
+    return texture;
+  }
+  
   // Cleanup method to release WebGL resources
   cleanup() {
     // Delete all shader programs
@@ -772,6 +855,17 @@ const fsSource = `
     
     // Удалить все текстуры, созданные из Canvas, и очистить кэш
     // Text rendering removed
+    // Delete all canvas-based textures
+    try {
+      this.canvasTextureList.forEach(tex => this.gl.deleteTexture(tex));
+      this.canvasTextureList.clear();
+      this.canvasTextureCache.clear();
+      this.cityMaskTextureList.forEach(tex => this.gl.deleteTexture(tex));
+      this.cityMaskTextureList.clear();
+      this.cityMaskTextureCache.clear();
+    } catch (e) {
+      console.warn('Failed to cleanup textures:', e);
+    }
     
     // Clear programs object
     this.programs = {};

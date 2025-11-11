@@ -105,7 +105,6 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
     const speed = Math.max(0, Number(gameConfig?.ui?.simulationSpeed ?? 1));
     const secondsPerGameHour = Math.max(0.001, Number(gameConfig?.ui?.secondsPerGameHour ?? 1));
     const hoursDelta = (dt * speed) / secondsPerGameHour;
-    const sdt = dt * speed;
     gameConfig.ui.simulationPaused = speed === 0;
 
     const cx = canvas.width/2;
@@ -115,15 +114,15 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
     planet._rotationOffset += (hoursDelta / (planet.dayLength || 24));
     planet._rotationOffset %= 1;
 
-    // Генерируем процедурную текстуру для планеты
-    // Используем planetIndex для консистентности с системным видом
+    // Генерируем процедурную текстуру для планеты (настраиваемый размер)
+    const pvTexSizes = gameConfig.ui?.textureSizes?.planet ?? { planet: 1024, moon: 512 };
     const planetTexture = generatePlanetTexture(
       star.x || (star.id * 1000), 
       star.y || (star.id * 1000), 
-      planetIndex, // Используем переданный planetIndex вместо planet.id
-      planet.type, 
-      256,
-      0 // moonIndex = 0 для планеты
+      planetIndex,
+      planet.type,
+      pvTexSizes.planet,
+      0
     );
 
     // Planet center с процедурной текстурой
@@ -156,23 +155,24 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
       if (moon.orbitRadius === undefined) moon.orbitRadius = 8 + mIndex*5;
       if (moon.size === undefined) moon.size = Math.max(4, Math.min(12, (planet.size/3) + mIndex));
       
-      // Обновляем орбиту и вращение луны с множителем скорости
-      moon._orbitProgress += moon.orbitSpeed * sdt;
-      moon._rotationOffset += (1 / (moon.dayLength || 12)) * sdt;
+      // Обновляем орбиту и вращение луны с тем же масштабированием времени, что и в системном виде
+      moon._orbitProgress += (moon.orbitSpeed ?? 0) * hoursDelta;
+      moon._orbitProgress %= (Math.PI * 2);
+      moon._rotationOffset += (hoursDelta / (moon.dayLength || 12));
       moon._rotationOffset %= 1;
       
       const orbitR = moon.orbitRadius * planetMult;
       const mx = cx + Math.cos(moon._orbitProgress) * orbitR;
       const my = cy + Math.sin(moon._orbitProgress) * orbitR;
       
-      // Генерируем процедурную текстуру для луны
+      // Генерируем процедурную текстуру для луны (настраиваемый размер)
       const moonTexture = generatePlanetTexture(
         star.x || (star.id * 1000), 
         star.y || (star.id * 1000), 
-        planetIndex, // Используем planetIndex для консистентности
+        planetIndex,
         moon.type, 
-        128, 
-        mIndex + 1 // moonIndex начинается с 1 для лун
+        pvTexSizes.moon, 
+        mIndex + 1
       );
       
       const moonColor = hexToRgbArray(moon.color);
@@ -357,12 +357,13 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
 
     // Генерируем процедурные текстуры
     // Для фоновой планеты используем тот же moonIndex = 0, что и в системном виде
+    const satTexSizes = gameConfig.ui?.textureSizes?.satellite ?? { planet: 512, moon: 1024 };
     const planetTexture = generatePlanetTexture(
       star.x || (star.id * 1000), 
       star.y || (star.id * 1000), 
       planetIndex, // Используем planetIndex для консистентности с системным видом
       planet.type, 
-      256,
+      satTexSizes.planet,
       0 // Явно указываем moonIndex = 0 для консистентности с системным видом
     );
 
@@ -371,7 +372,7 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
       star.y || (star.id * 1000), 
       planetIndex, // Используем planetIndex для консистентности
       moon.type, 
-      256, 
+      satTexSizes.moon, 
       moonIndex + 1 // Используем переданный moonIndex + 1
     );
 

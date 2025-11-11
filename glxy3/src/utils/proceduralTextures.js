@@ -158,6 +158,7 @@ const PLANET_TYPES = {
       { name: 'rock', elev: [0.35, 0.55], color: [160, 130, 90], noiseTint: 0.15 },
       { name: 'mesa', elev: [0.55, 1.0], color: [140, 110, 80], noiseTint: 0.15 },
     ]
+    , noCitiesBiomes: ['dunes', 'shore']
   },
   ice: {
     waterLevel: -0.3,
@@ -192,6 +193,7 @@ const PLANET_TYPES = {
       { name: 'highlands', elev: [0.4, 0.7], color: [150, 130, 100], noiseTint: 0.15 },
       { name: 'mountain', elev: [0.7, 1.0], color: [160, 160, 170], noiseTint: 0.25 },
     ]
+    , noCitiesBiomes: ['mountain']
   },
   lava: {
     waterLevel: -0.8,
@@ -202,6 +204,7 @@ const PLANET_TYPES = {
       { name: 'lavaFlow', elev: [0.2, 0.6], color: [200, 60, 20], noiseTint: 0.25 },
       { name: 'glow', elev: [0.6, 1.0], color: [255, 120, 60], noiseTint: 0.25 },
     ]
+    , noCitiesBiomes: ['lavaFlow', 'glow']
   },
   volcanic: {
     waterLevel: -0.6,
@@ -212,6 +215,7 @@ const PLANET_TYPES = {
       { name: 'lavaFlow', elev: [0.4, 0.7], color: [200, 60, 20], noiseTint: 0.25 },
       { name: 'cone', elev: [0.7, 1.0], color: [100, 100, 110], noiseTint: 0.2 },
     ]
+    , noCitiesBiomes: ['lavaFlow', 'cone']
   },
   toxic: {
     waterLevel: -0.4,
@@ -222,6 +226,7 @@ const PLANET_TYPES = {
       { name: 'acidFlats', elev: [0.2, 0.5], color: [100, 220, 60], noiseTint: 0.2 },
       { name: 'fumes', elev: [0.5, 1.0], color: [160, 230, 100], noiseTint: 0.15 },
     ]
+    , noCitiesBiomes: ['acidFlats', 'fumes']
   },
   crystal: {
     waterLevel: -0.8,
@@ -231,6 +236,7 @@ const PLANET_TYPES = {
       { name: 'plain', elev: [0.0, 0.5], color: [150, 100, 255], noiseTint: 0.15 },
       { name: 'spires', elev: [0.5, 1.0], color: [200, 160, 255], noiseTint: 0.2 },
     ]
+    , noCitiesBiomes: ['spires']
   },
   gas: {
     waterLevel: -2.0,
@@ -320,6 +326,13 @@ class BiomeSystem {
       clamp(Math.round(base[1] * factor), 0, 255),
       clamp(Math.round(base[2] * factor), 0, 255)
     ];
+  }
+
+  // Возвращает доминирующий биом по текущим высоте/широте (наиболее близкий по высоте)
+  dominantBiomeName(elevN, latN) {
+    const cands = this.findCandidates(elevN, latN);
+    const { b1 } = this.blendByElevation(cands, elevN);
+    return b1 && b1.name ? b1.name : null;
   }
 }
 
@@ -449,7 +462,11 @@ generateTexture() {
 
       // Urbanization mask: deterministic city light density based on suitability
       // Suitability: near water level on land, mid latitudes preferred, avoid poles/mountains
-      const isLand = elevN >= 0.0 && this.planetType !== 'gas';
+      // Исключаем урбанизацию на отдельных биомах в зависимости от типа планеты
+      const biomeName = this.biomes.dominantBiomeName(elevN, latN);
+      const noCitiesBiomes = (this.typeParams && this.typeParams.noCitiesBiomes) ? this.typeParams.noCitiesBiomes : [];
+      const biomeAllowed = biomeName ? !noCitiesBiomes.includes(biomeName) : true;
+      const isLand = elevN >= 0.0 && this.planetType !== 'gas' && biomeAllowed;
       if (isLand && this.developmentLevel > 0) {
         const nearCoast = smoothstep(0.0, 0.12, Math.abs(elevN)); // coasts favored
         const midLatPref = smoothstep(0.2, 0.8, latN) * (1.0 - smoothstep(0.7, 1.0, latN));

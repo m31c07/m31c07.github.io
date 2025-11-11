@@ -280,14 +280,15 @@ export function renderStarSystem(canvas, star, explorationSystem, onBack, onPlan
     const x = centerX + Math.cos(planet._orbitProgress) * pr;
     const y = centerY + Math.sin(planet._orbitProgress) * pr;
 
-    // Generate procedural texture for the planet
+    // Generate procedural texture for the planet (configurable size)
+    const sysTexSizes = gameConfig.ui?.textureSizes?.starsystem ?? { planet: 512, moon: 128 };
     const planetTexture = generatePlanetTexture(
       star.x, 
       star.y, 
       pIndex, 
       planet.type, 
-      128, // texture size - smaller for 2D view
-      0    // moonIndex = 0 for planets
+      sysTexSizes.planet,
+      0
     );
 
     const planetColor = hexToRgbArray(planet.color);
@@ -332,14 +333,14 @@ export function renderStarSystem(canvas, star, explorationSystem, onBack, onPlan
       const moonX = x + Math.cos(moon._orbitProgress) * orbitR;
       const moonY = y + Math.sin(moon._orbitProgress) * orbitR;
       
-      // Generate procedural texture for the moon
+      // Generate procedural texture for the moon (configurable size)
       const moonTexture = generatePlanetTexture(
         star.x, 
         star.y, 
         pIndex, 
         moon.type, 
-        64, // smaller texture size for moons
-        mIndex + 1 // moonIndex for unique textures
+        sysTexSizes.moon,
+        mIndex + 1
       );
       
       const moonColor = hexToRgbArray(moon.color);

@@ -38,6 +38,15 @@ export const gameConfig = {
     planetScreenLabelZoomThreshold: 0.5,
     showMoonScreenLabels: true,
     moonScreenLabelZoomThreshold: 0.5,
+    // Размеры процедурных текстур для разных экранов
+    textureSizes: {
+      // Системный вид звёздной системы
+      starsystem: { planet: 512, moon: 128 },
+      // Детальный вид планеты
+      planet: { planet: 1024, moon: 512 },
+      // Детальный вид спутника (satellite)
+      satellite: { planet: 512, moon: 1024 }
+    },
     galaxyCamera: {
       offsetX: 0,
       offsetY: 0,
