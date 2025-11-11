@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Лаборатория планет</title>
+    <link rel="stylesheet" href="./planet_lab.css">
+  </head>
+  <body>
+    <div class="lab-layout">
+      <header class="lab-header">
+        <h1>Лаборатория генерации планет</h1>
+        <div class="type-buttons" id="typeButtons"></div>
+      </header>
+
+      <main class="lab-main">
+        <section class="controls">
+          <div class="control-row">
+            <label for="textureSize">Размер текстуры</label>
+            <select id="textureSize">
+              <option value="256">256</option>
+              <option value="512" selected>512</option>
+              <option value="1024">1024</option>
+            </select>
+          </div>
+          <div class="control-row">
+            <label for="rotationSpeed">Скорость вращения</label>
+            <input type="range" id="rotationSpeed" min="-0.05" max="0.05" step="0.001" value="0.01">
+            <input type="number" id="rotationSpeedInput" min="-0.05" max="0.05" step="0.001" value="0.01">
+          </div>
+          <div class="control-row">
+            <label for="developmentLevel">Уровень урбанизации</label>
+            <input type="range" id="developmentLevel" min="0" max="1" step="0.01" value="0.0">
+            <input type="number" id="developmentLevelInput" min="0" max="1" step="0.01" value="0.0">
+          </div>
+          <hr />
+          <div id="paramSliders" class="param-sliders"></div>
+        </section>
+
+        <section class="viewport">
+          <canvas id="labCanvas"></canvas>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./planet_lab.js"></script>
+  </body>
+  </html>
