@@ -86,6 +86,27 @@ export function generateGalaxyMap() {
     spectralType: 'G', // Sun-like star for player
     explored: true
   };
+  // Назначаем разную степень урбанизации (0..0.2) планетам и лунам в стартовой системе
+  try {
+    const planetsArr = playerStartStar?.planets?.planets || [];
+    planetsArr.forEach((planet, pIndex) => {
+      // Равномерно распределим значения 0..0.2 с небольшой случайностью
+      const base = (pIndex + 1) / (planetsArr.length + 1); // 0..1
+      const jitter = Math.random() * 0.2; // 0..0.2
+      const devLevel = Math.max(0, Math.min(0.2, base * 0.2 * 0.7 + jitter * 0.3));
+      planet.developmentLevel = Number(devLevel.toFixed(3));
+      if (Array.isArray(planet.moons)) {
+        planet.moons.forEach((moon, mIndex) => {
+          const mBase = (mIndex + 1) / (planet.moons.length + 1);
+          const mJitter = Math.random() * 0.2;
+          const mDev = Math.max(0, Math.min(0.2, mBase * 0.2 * 0.6 + mJitter * 0.4));
+          moon.developmentLevel = Number(mDev.toFixed(3));
+        });
+      }
+    });
+  } catch (e) {
+    console.warn('Failed to assign development levels to starting system:', e);
+  }
   
   stars.push(playerStartStar);
   gameConfig.player.startingSystemId = 0;

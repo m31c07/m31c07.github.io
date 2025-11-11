@@ -122,7 +122,8 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
       planetIndex,
       planet.type,
       pvTexSizes.planet,
-      0
+      0,
+      planet.developmentLevel ?? 0
     );
 
     // Planet center с процедурной текстурой
@@ -172,7 +173,8 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
         planetIndex,
         moon.type, 
         pvTexSizes.moon, 
-        mIndex + 1
+        mIndex + 1,
+        moon.developmentLevel ?? 0
       );
       
       const moonColor = hexToRgbArray(moon.color);
@@ -364,7 +366,8 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
       planetIndex, // Используем planetIndex для консистентности с системным видом
       planet.type, 
       satTexSizes.planet,
-      0 // Явно указываем moonIndex = 0 для консистентности с системным видом
+      0, // Явно указываем moonIndex = 0 для консистентности с системным видом
+      planet.developmentLevel ?? 0
     );
 
     const moonTexture = generatePlanetTexture(
@@ -373,7 +376,8 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
       planetIndex, // Используем planetIndex для консистентности
       moon.type, 
       satTexSizes.moon, 
-      moonIndex + 1 // Используем переданный moonIndex + 1
+      moonIndex + 1, // Используем переданный moonIndex + 1
+      moon.developmentLevel ?? 0
     );
 
     // Massive blurred planet in background (covering most of the screen)

@@ -117,7 +117,7 @@ function createDropdown(anchorEl, items) {
   dd.style.zIndex = '10001';
   dd.style.backdropFilter = 'blur(2px)';
 
-  items.forEach(({ label, onClick }) => {
+  items.forEach(({ label, onClick, underline }) => {
     const item = document.createElement('div');
     item.textContent = label;
     item.style.padding = '6px 10px';
@@ -127,6 +127,7 @@ function createDropdown(anchorEl, items) {
     item.style.whiteSpace = 'nowrap';
     item.style.textOverflow = 'ellipsis';
     item.style.overflow = 'hidden';
+    if (underline) item.style.textDecoration = 'underline';
     item.addEventListener('mouseenter', () => { item.style.background = 'rgba(60, 80, 105, 0.35)'; });
     item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
     item.addEventListener('click', (e) => {
@@ -167,7 +168,14 @@ export function updateBreadcrumbs({
     const starLabel = star.name || (gameConfig?.exploration?.unexploredSystemName || 'Система');
     // Build dropdown of planets for star segment if available
     const planetList = Array.isArray(star?.planets?.planets) ? star.planets.planets : [];
-    const starDropdown = planetList.map((p, idx) => ({
+    // Первый пункт — сама звёздная система (подчеркнутый)
+    const starDropdown = [{
+      label: starLabel,
+      onClick: () => { try { onStar?.(); } catch (err) { console.error('onStar error:', err); } },
+      underline: true
+    }];
+    // Далее — список планет
+    starDropdown.push(...planetList.map((p, idx) => ({
       label: p?.name || `Планета ${idx + 1}`,
       onClick: () => {
         if (typeof onPlanetIndex === 'function') {
@@ -176,7 +184,7 @@ export function updateBreadcrumbs({
           try { onPlanet(); } catch (err) { console.error('onPlanet error:', err); }
         }
       }
-    }));
+    })));
     segments.push({ label: starLabel, onClick: onStar, dropdownItems: starDropdown });
 
     if (planetIndex !== null && planetIndex !== undefined) {
@@ -184,7 +192,14 @@ export function updateBreadcrumbs({
       const planetLabel = planet?.name || `Планета ${Number(planetIndex) + 1}`;
       // Build dropdown of moons for planet segment if available
       const moonList = Array.isArray(planet?.moons) ? planet.moons : [];
-      const planetDropdown = moonList.map((m, idx) => ({
+      // Первый пункт — сама планета (подчеркнутый)
+      const planetDropdown = [{
+        label: planetLabel,
+        onClick: () => { try { onPlanet?.(); } catch (err) { console.error('onPlanet error:', err); } },
+        underline: true
+      }];
+      // Далее — список лун
+      planetDropdown.push(...moonList.map((m, idx) => ({
         label: m?.name || `Луна ${idx + 1}`,
         onClick: () => {
           if (typeof onMoonIndex === 'function') {
@@ -193,7 +208,7 @@ export function updateBreadcrumbs({
             try { onMoon(); } catch (err) { console.error('onMoon error:', err); }
           }
         }
-      }));
+      })));
       segments.push({ label: planetLabel, onClick: onPlanet, dropdownItems: planetDropdown });
 
       if (moonIndex !== null && moonIndex !== undefined) {

@@ -288,7 +288,8 @@ export function renderStarSystem(canvas, star, explorationSystem, onBack, onPlan
       pIndex, 
       planet.type, 
       sysTexSizes.planet,
-      0
+      0,
+      planet.developmentLevel ?? 0
     );
 
     const planetColor = hexToRgbArray(planet.color);
@@ -340,7 +341,8 @@ export function renderStarSystem(canvas, star, explorationSystem, onBack, onPlan
         pIndex, 
         moon.type, 
         sysTexSizes.moon,
-        mIndex + 1
+        mIndex + 1,
+        moon.developmentLevel ?? 0
       );
       
       const moonColor = hexToRgbArray(moon.color);
