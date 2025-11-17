@@ -76,3 +76,39 @@ const greekLetters = [
 ];
 
 export { greekLetters };
+
+export function advanceCalendarByHours(hoursDelta) {
+  const cal = gameConfig.calendar;
+  const mpY = Number(cal.monthsPerYear ?? 12);
+  const dpM = Number(cal.daysPerMonth ?? 30);
+  const hpD = Number(cal.hoursPerDay ?? 24);
+  cal.hour = Number(cal.hour ?? 0) + Number(hoursDelta || 0);
+  while (cal.hour >= hpD) { cal.hour -= hpD; cal.day += 1; }
+  while (cal.day >= dpM) { cal.day -= dpM; cal.month += 1; }
+  while (cal.month >= mpY) { cal.month -= mpY; cal.year += 1; }
+  return ((cal.year * mpY + cal.month) * dpM + cal.day) * hpD + cal.hour;
+}
+
+export function computeTotalHours() {
+  const cal = gameConfig.calendar;
+  const mpY = Number(cal.monthsPerYear ?? 12);
+  const dpM = Number(cal.daysPerMonth ?? 30);
+  const hpD = Number(cal.hoursPerDay ?? 24);
+  return ((cal.year * mpY + cal.month) * dpM + cal.day) * hpD + (Number(cal.hour ?? 0));
+}
+
+export function getRandomSpectralType(seed) {
+  let s = seed >>> 0;
+  function rng() {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  }
+  const types = ['O', 'B', 'A', 'F', 'G', 'K', 'M'];
+  const weights = [5.00003, 5.13, 5.6, 8, 17.6, 22.1, 40.45];
+  let rnd = rng() * 100;
+  for (let i = 0; i < types.length; i++) {
+    if (rnd < weights[i]) return types[i];
+    rnd -= weights[i];
+  }
+  return 'M';
+}

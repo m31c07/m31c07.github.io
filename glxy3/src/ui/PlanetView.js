@@ -1,9 +1,9 @@
 // src/ui/PlanetView.js
-import { generatePlanetTexture } from '../utils/proceduralTextures.js';
+import { generatePlanetTexture, generatePlanetTextureAsync } from '../utils/proceduralTextures.js';
 import WebGLRenderer from '../renderers/WebGLRenderer.js';
 import { CanvasControls } from './CanvasControls.js';
 import { gameConfig } from '../config/gameConfig.js';
-import { hexToRgbArray } from '../utils/utils.js';
+import { hexToRgbArray, advanceCalendarByHours, computeTotalHours } from '../utils/utils.js';
 
 
 // getPlanetColor is imported from StarSystemView.js
@@ -24,8 +24,10 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
   const controls = new CanvasControls(canvas, planet, {
     renderer,
     cameraKey: 'planetCamera',
-    zoomLimits: { min: 0.05, max: 5.0 },
-    panBounds: { centerX: canvas.width/2, centerY: canvas.height/2, limit: Math.min(canvas.width, canvas.height)/2 }
+    zoomLimits: { min: 1.0, max: 1.0 },
+    panBounds: { centerX: canvas.width/2, centerY: canvas.height/2, limit: 0 },
+    disablePan: true,
+    disableZoom: true
   });
 
   // Оверлей-канвас для подписей планеты и её лун
@@ -44,8 +46,19 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
   labelsCanvas.style.pointerEvents = 'none';
   labelsCanvas.style.zIndex = '100';
   document.body.appendChild(labelsCanvas);
-  const onResizePlanet = () => syncLabelsCanvasSize();
-  window.addEventListener('resize', onResizePlanet);
+  const onResizePlanet = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    renderer.setSize(canvas.width, canvas.height);
+    syncLabelsCanvasSize();
+    projectionMatrix[0] = 2 / canvas.width;
+    projectionMatrix[5] = -2 / canvas.height;
+    controls.panBounds = { centerX: canvas.width/2, centerY: canvas.height/2, limit: 0 };
+    controls.offsetX = window.innerWidth/2 - canvas.width/2 * controls.scale;
+    controls.offsetY = window.innerHeight/2 - canvas.height/2 * controls.scale;
+    try { draw(); } catch (_) {}
+  };
+  
 
   const projectionMatrix = new Float32Array([
     2 / canvas.width, 0, 0, 0,
@@ -59,45 +72,158 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
     0, 0, 1, 0,
     0, 0, 0, 1
   ]);
+  window.addEventListener('resize', onResizePlanet);
 
   // Планетный масштаб: увеличиваем визуальный размер в 10 раз
   const planetScale = 10;
 
-  // Инициализация вращения планеты и лун
-  if (planet._rotationOffset === undefined) {
-    planet._rotationOffset = 0;
-  }
-  if (planet.moons) {
-    planet.moons.forEach((moon) => {
-      if (moon._rotationOffset === undefined) {
-        moon._rotationOffset = 0;
-      }
-    });
+  const pvTexSizes = gameConfig.ui?.textureSizes?.planet ?? { planet: 1024, moon: 512 };
+  const lowResSize = 128;
+  let textureInitQueue = [];
+  let textureUpgradeQueue = [];
+  let textureInitPtr = 0;
+  let textureUpgradePtr = 0;
+  let textureInitIdleId = null;
+  let textureUpgradeIdleId = null;
+  let isTextureGenRunning = false;
+
+  // Инициализация вращения планеты
+  {
+    const totalHours = computeTotalHours();
+    planet._rotationOffset = planet.dayLength ? ((totalHours / planet.dayLength) % 1) : 0;
   }
 
-  // Расширяем границы панорамирования с учётом увеличенных орбит
-  {
-    const baseMult = Math.max(30 / planet.size, 3);
-    const planetMultForBounds = planetScale * baseMult;
-    let maxMoonOrbit = 0;
-    planet.moons?.forEach((moon, mIndex) => {
-      const mrBase = moon.orbitRadius ?? (8 + mIndex * 5);
-      const mr = mrBase * planetMultForBounds;
-      if (mr > maxMoonOrbit) maxMoonOrbit = mr;
-    });
-    const currentLimit = Math.min(canvas.width, canvas.height) / 2;
-    controls.panBounds = {
-      centerX: canvas.width/2,
-      centerY: canvas.height/2,
-      limit: Math.max(currentLimit, maxMoonOrbit + 20)
-    };
+  if (planet) {
+    textureInitQueue.push({ t: 'p' });
+    textureUpgradeQueue.push({ t: 'p' });
   }
+
+  function scheduleTextureInitializations() {
+    function processNext() {
+      if (isTextureGenRunning) return;
+      if (textureInitPtr >= textureInitQueue.length) return;
+      isTextureGenRunning = true;
+      const item = textureInitQueue[textureInitPtr++];
+      try {
+        if (item.t === 'p') {
+          if (!planet._texCanvasLow && !planet._texCanvasHigh) {
+            const tex = generatePlanetTexture(
+              star.systemSeed,
+              planetIndex,
+              planet.type,
+              lowResSize,
+              0,
+              planet.developmentLevel ?? 0
+            );
+            planet._texCanvasLow = tex;
+          }
+        } else {
+          const m = planet.moons?.[item.mIndex];
+          if (m && !m._texCanvasLow && !m._texCanvasHigh) {
+            const tex = generatePlanetTexture(
+              star.systemSeed,
+              planetIndex,
+              m.type,
+              lowResSize,
+              item.mIndex + 1,
+              m.developmentLevel ?? 0
+            );
+            m._texCanvasLow = tex;
+          }
+        }
+      } finally {
+        isTextureGenRunning = false;
+        if (textureInitPtr < textureInitQueue.length) scheduleNext();
+      }
+    }
+    function scheduleNext() {
+      if (textureInitPtr >= textureInitQueue.length) return;
+      if (typeof window.requestIdleCallback === 'function') {
+        textureInitIdleId = window.requestIdleCallback(() => processNext(), { timeout: 100 });
+      } else {
+        textureInitIdleId = setTimeout(() => processNext(), 16);
+      }
+    }
+    scheduleNext();
+  }
+
+  function scheduleTextureUpgrades() {
+    function processNext() {
+      if (isTextureGenRunning) return;
+      if (textureUpgradePtr >= textureUpgradeQueue.length) return;
+      isTextureGenRunning = true;
+      const item = textureUpgradeQueue[textureUpgradePtr++];
+      if (item.t === 'p') {
+        generatePlanetTextureAsync(
+          star.systemSeed,
+          planetIndex,
+          planet.type,
+          pvTexSizes.planet,
+          0,
+          planet.developmentLevel ?? 0,
+          { chunkRows: 12 }
+        ).then((tex) => {
+          planet._texCanvasHigh = tex;
+          if (planet._texCanvasLow && planet._texCanvasLow !== tex) {
+            try { renderer.deleteTextureForCanvas(planet._texCanvasLow); } catch (_) {}
+            planet._texCanvasLow = null;
+          }
+        }).finally(() => {
+          isTextureGenRunning = false;
+          if (textureUpgradePtr < textureUpgradeQueue.length) scheduleNext();
+        });
+      } else {
+        const m = planet.moons?.[item.mIndex];
+        if (m) {
+          generatePlanetTextureAsync(
+            star.systemSeed,
+            planetIndex,
+            m.type,
+            pvTexSizes.moon,
+            item.mIndex + 1,
+            m.developmentLevel ?? 0,
+            { chunkRows: 12 }
+          ).then((tex) => {
+            m._texCanvasHigh = tex;
+            if (m._texCanvasLow && m._texCanvasLow !== tex) {
+              try { renderer.deleteTextureForCanvas(m._texCanvasLow); } catch (_) {}
+              m._texCanvasLow = null;
+            }
+          }).finally(() => {
+            isTextureGenRunning = false;
+            if (textureUpgradePtr < textureUpgradeQueue.length) scheduleNext();
+          });
+        } else {
+          isTextureGenRunning = false;
+          if (textureUpgradePtr < textureUpgradeQueue.length) scheduleNext();
+        }
+      }
+    }
+    function scheduleNext() {
+      if (textureUpgradePtr >= textureUpgradeQueue.length) return;
+      if (typeof window.requestIdleCallback === 'function') {
+        textureUpgradeIdleId = window.requestIdleCallback(() => processNext(), { timeout: 100 });
+      } else {
+        textureUpgradeIdleId = setTimeout(() => processNext(), 16);
+      }
+    }
+    scheduleNext();
+  }
+
+  
+  controls.scale = 1.0;
+  controls.offsetX = window.innerWidth/2 - canvas.width/2 * controls.scale;
+  controls.offsetY = window.innerHeight/2 - canvas.height/2 * controls.scale;
+
+  const planetColorCached = hexToRgbArray(planet.color);
 
   let lastUpdateTime = performance.now();
+  let lastFrameTime = 0;
+  let lastCameraState = { offsetX: controls.offsetX, offsetY: controls.offsetY, scale: controls.scale };
   let animationId;
+  
 
   function draw() {
-    window.actionButtons = [];
     const scene = { objects: [], textBatches: [] };
     const now = performance.now();
     const dt = (now - lastUpdateTime)/1000;
@@ -105,129 +231,71 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
     const speed = Math.max(0, Number(gameConfig?.ui?.simulationSpeed ?? 1));
     const secondsPerGameHour = Math.max(0.001, Number(gameConfig?.ui?.secondsPerGameHour ?? 1));
     const hoursDelta = (dt * speed) / secondsPerGameHour;
+    const totalHours = advanceCalendarByHours(hoursDelta);
     gameConfig.ui.simulationPaused = speed === 0;
+    const { offsetX, offsetY, scale } = controls.getCameraState();
+    const cameraChanged = !lastCameraState || Math.abs(lastCameraState.offsetX - offsetX) > 0.1 || Math.abs(lastCameraState.offsetY - offsetY) > 0.1 || Math.abs(lastCameraState.scale - scale) > 0.001;
+    const targetFps = Number(gameConfig?.ui?.targetFps ?? 60);
+    const minFrameMs = 1000 / targetFps;
+    if (speed > 0) {
+      if (now - lastFrameTime < minFrameMs) {
+        animationId = requestAnimationFrame(draw);
+        return;
+      }
+      lastFrameTime = now;
+    } else {
+      if (!cameraChanged) {
+        animationId = requestAnimationFrame(draw);
+        return;
+      }
+    }
+    window.actionButtons = [];
+    lastCameraState = { offsetX, offsetY, scale };
 
     const cx = canvas.width/2;
     const cy = canvas.height/2;
 
-    // Обновляем вращение планеты с множителем скорости
-    planet._rotationOffset += (hoursDelta / (planet.dayLength || 24));
-    planet._rotationOffset %= 1;
+    // Обновляем вращение планеты на основе календаря
+    planet._rotationOffset = planet.dayLength ? ((totalHours / planet.dayLength) % 1) : planet._rotationOffset;
+    planet._orbitProgress = (planet.initialOrbitAngle ?? 0) + ((planet.orbitSpeed ?? 0) * totalHours);
 
-    // Генерируем процедурную текстуру для планеты (настраиваемый размер)
-    const pvTexSizes = gameConfig.ui?.textureSizes?.planet ?? { planet: 1024, moon: 512 };
-    const planetTexture = generatePlanetTexture(
-      star.x || (star.id * 1000), 
-      star.y || (star.id * 1000), 
-      planetIndex,
-      planet.type,
-      pvTexSizes.planet,
-      0,
-      planet.developmentLevel ?? 0
-    );
+    const planetTexture = planet._texCanvasHigh || planet._texCanvasLow;
 
-    // Planet center с процедурной текстурой
-    const planetColor = hexToRgbArray(planet.color);
+    // Planet center
+    const planetColor = planetColorCached;
     const planetMult = planetScale * Math.max(30 / planet.size, 3);
-    
-    // В детальном виде планеты звезда находится далеко, поэтому используем направленный свет
-    // Позиционируем "звезду" слева от планеты для создания эффекта освещения
-    const starDirection = [-canvas.width * 0.3, cy]; // Звезда слева от планеты
+    const phase = Math.sin(planet._orbitProgress ?? 0);
+    const frontness = -phase;
+    const depthFactor = 0.925 + 0.075 * frontness;
+    const lightZ = frontness;
+    const dirScale = 100;
+    const starX = cx - Math.cos(planet._orbitProgress ?? 0) * dirScale;
+    const starY = cy - Math.sin(planet._orbitProgress ?? 0) * dirScale * 0.5;
     
     scene.objects.push({
       type: 'planet2D',
       vertices: [cx, cy],
       position: [cx, cy],
-      starPosition: starDirection, // Add star position for lighting
+      starPosition: [starX, starY],
       pointSize: (planet.size * planetMult) * controls.getCameraState().scale,
       color: planetColor,
       texture: planetTexture,
       rotationOffset: planet._rotationOffset,
+      depthFactor,
+      lightZ,
       drawMode: renderer.gl.POINTS
     });
 
-    // Moons orbiting с процедурными текстурами и вращением
-    planet.moons?.forEach((moon, mIndex) => {
-      if (moon._orbitProgress === undefined) moon._orbitProgress = (moon.initialOrbitAngle ?? (Math.random()*Math.PI*2));
-      if (moon.orbitSpeed === undefined) {
-        const r = moon.orbitRadius ?? (8 + mIndex * 5);
-        moon.orbitSpeed = 0.05 + (0.3 / Math.sqrt(r / 8));
-      }
-      if (moon.orbitRadius === undefined) moon.orbitRadius = 8 + mIndex*5;
-      if (moon.size === undefined) moon.size = Math.max(4, Math.min(12, (planet.size/3) + mIndex));
-      
-      // Обновляем орбиту и вращение луны с тем же масштабированием времени, что и в системном виде
-      moon._orbitProgress += (moon.orbitSpeed ?? 0) * hoursDelta;
-      moon._orbitProgress %= (Math.PI * 2);
-      moon._rotationOffset += (hoursDelta / (moon.dayLength || 12));
-      moon._rotationOffset %= 1;
-      
-      const orbitR = moon.orbitRadius * planetMult;
-      const mx = cx + Math.cos(moon._orbitProgress) * orbitR;
-      const my = cy + Math.sin(moon._orbitProgress) * orbitR;
-      
-      // Генерируем процедурную текстуру для луны (настраиваемый размер)
-      const moonTexture = generatePlanetTexture(
-        star.x || (star.id * 1000), 
-        star.y || (star.id * 1000), 
-        planetIndex,
-        moon.type, 
-        pvTexSizes.moon, 
-        mIndex + 1,
-        moon.developmentLevel ?? 0
-      );
-      
-      const moonColor = hexToRgbArray(moon.color);
-      
-      // orbit line
-      const orbitVerts = [];
-      const steps = 64;
-      for (let i=0;i<=steps;i++) {
-        const a = (i/steps)*Math.PI*2;
-        orbitVerts.push(cx + Math.cos(a)*orbitR, cy + Math.sin(a)*orbitR);
-      }
-      scene.objects.push({ 
-        type: 'line', 
-        vertices: orbitVerts, 
-        color: [0.3,0.3,0.3,0.35], 
-        drawMode: renderer.gl.LINE_STRIP 
-      });
-      
-      // moon с процедурной текстурой и вращением
-      scene.objects.push({ 
-        type: 'moon2D', 
-        vertices: [mx,my], 
-        position: [mx,my], 
-        starPosition: starDirection, // Add star position for lighting
-        pointSize: (moon.size * planetScale) * controls.getCameraState().scale, 
-        color: moonColor, 
-        texture: moonTexture,
-        rotationOffset: moon._rotationOffset,
-        drawMode: renderer.gl.POINTS 
-      });
-      
-      const { offsetX, offsetY, scale } = controls.getCameraState();
-      const msx = mx*scale + offsetX; 
-      const msy = my*scale + offsetY;
-      window.actionButtons.push({ 
-        x: msx-12, 
-        y: msy-12, 
-        width: 24, 
-        height: 24, 
-        onClick: () => onMoonClick(moon, mIndex) 
-      });
-    });
+    
 
     // Breadcrumb
     // Text rendering removed
 
-    const { offsetX, offsetY, scale } = controls.getCameraState();
     viewMatrix[0] = scale; viewMatrix[5] = scale; viewMatrix[12] = offsetX; viewMatrix[13] = offsetY;
     renderer.setCamera(projectionMatrix, viewMatrix);
 
     try { renderer.render(scene); } catch (e) { console.error(e); }
-    // Подписи для планеты и её лун
-    drawPlanetLabels();
+    if (cameraChanged) { drawPlanetLabels(); }
     animationId = requestAnimationFrame(draw);
   }
 
@@ -254,18 +322,7 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
     const planetText = planet.name || `Планета ${planetIndex + 1}`;
     labelsCtx.fillText(planetText, (psx + 14), (psy - 6));
 
-    // Подписи лун
-    const planetMult = planetScale * Math.max(30 / planet.size, 3);
-    planet.moons?.forEach((moon, mIndex) => {
-      const orbitR = (moon.orbitRadius ?? (8 + mIndex * 5)) * planetMult;
-      const mx = cx + Math.cos(moon._orbitProgress ?? 0) * orbitR;
-      const my = cy + Math.sin(moon._orbitProgress ?? 0) * orbitR;
-      const msx = mx * scale + offsetX;
-      const msy = my * scale + offsetY;
-      labelsCtx.fillStyle = '#cfd3d6';
-      const mtext = moon.name || `Луна ${mIndex + 1}`;
-    labelsCtx.fillText(mtext, (msx + 12), (msy - 4));
-    });
+    
   }
 
   function cleanup() { 
@@ -276,11 +333,31 @@ export function renderPlanetScreen(canvas, star, planet, planetIndex, onGalaxy, 
     if (renderer) { 
       try { renderer.cleanup(); } catch (e) { console.error('Renderer cleanup error (planet):', e); } 
     }
+    try {
+      if (textureInitIdleId != null) {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(textureInitIdleId);
+        } else {
+          clearTimeout(textureInitIdleId);
+        }
+        textureInitIdleId = null;
+      }
+      if (textureUpgradeIdleId != null) {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(textureUpgradeIdleId);
+        } else {
+          clearTimeout(textureUpgradeIdleId);
+        }
+        textureUpgradeIdleId = null;
+      }
+    } catch (_) {}
     window.removeEventListener('resize', onResizePlanet);
     try {
       if (labelsCanvas && labelsCanvas.parentNode) labelsCanvas.parentNode.removeChild(labelsCanvas);
     } catch (e) { console.error('Labels overlay cleanup error (planet):', e); }
   }
+  scheduleTextureInitializations();
+  scheduleTextureUpgrades();
   draw();
   return cleanup;
 }
@@ -310,8 +387,17 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
   labelsCanvasMoon.style.pointerEvents = 'none';
   labelsCanvasMoon.style.zIndex = '100';
   document.body.appendChild(labelsCanvasMoon);
-  const onResizeMoon = () => syncLabelsCanvasMoonSize();
-  window.addEventListener('resize', onResizeMoon);
+  const onResizeMoon = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    renderer.setSize(canvas.width, canvas.height);
+    syncLabelsCanvasMoonSize();
+    projectionMatrix[0] = 2 / canvas.width;
+    projectionMatrix[5] = -2 / canvas.height;
+    controls.panBounds = { centerX: canvas.width/2, centerY: canvas.height/2, limit: Math.min(canvas.width, canvas.height)/2 };
+    try { draw(); } catch (_) {}
+  };
+  
 
   const projectionMatrix = new Float32Array([
     2 / canvas.width, 0, 0, 0,
@@ -325,63 +411,175 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
     0, 0, 1, 0,
     0, 0, 0, 1
   ]);
+  window.addEventListener('resize', onResizeMoon);
 
   // Инициализация вращения планеты и луны
-  if (planet._rotationOffset === undefined) {
-    planet._rotationOffset = 0;
-  }
-  if (moon._rotationOffset === undefined) {
-    moon._rotationOffset = 0;
+  {
+    const totalHours = computeTotalHours();
+    planet._rotationOffset = planet.dayLength ? ((totalHours / planet.dayLength) % 1) : (planet._rotationOffset ?? 0);
+    moon._rotationOffset = moon.dayLength ? ((totalHours / moon.dayLength) % 1) : (moon._rotationOffset ?? 0);
   }
 
   let lastUpdateTime = performance.now();
+  let lastFrameTime = 0;
   let animationId;
 
+  const satTexSizes = gameConfig.ui?.textureSizes?.satellite ?? { planet: 512, moon: 1024 };
+  const lowResSize = 128;
+  let textureInitQueue = [];
+  let textureUpgradeQueue = [];
+  let textureInitPtr = 0;
+  let textureUpgradePtr = 0;
+  let textureInitIdleId = null;
+  let textureUpgradeIdleId = null;
+  let isTextureGenRunning = false;
+  const planetColorCachedMoonView = hexToRgbArray(planet.color);
+  const moonColorCachedMoonView = hexToRgbArray(moon.color);
+
+  textureInitQueue.push({ t: 'p' });
+  textureUpgradeQueue.push({ t: 'p' });
+  textureInitQueue.push({ t: 'm' });
+  textureUpgradeQueue.push({ t: 'm' });
+
+  function scheduleTextureInitializations() {
+    function processNext() {
+      if (isTextureGenRunning) return;
+      if (textureInitPtr >= textureInitQueue.length) return;
+      isTextureGenRunning = true;
+      const item = textureInitQueue[textureInitPtr++];
+      try {
+        if (item.t === 'p') {
+          if (!planet._texCanvasLow && !planet._texCanvasHigh) {
+            const tex = generatePlanetTexture(
+              star.systemSeed,
+              planetIndex,
+              planet.type,
+              lowResSize,
+              0,
+              planet.developmentLevel ?? 0
+            );
+            planet._texCanvasLow = tex;
+          }
+        } else {
+          if (!moon._texCanvasLow && !moon._texCanvasHigh) {
+            const tex = generatePlanetTexture(
+              star.systemSeed,
+              planetIndex,
+              moon.type,
+              lowResSize,
+              moonIndex + 1,
+              moon.developmentLevel ?? 0
+            );
+            moon._texCanvasLow = tex;
+          }
+        }
+      } finally {
+        isTextureGenRunning = false;
+        if (textureInitPtr < textureInitQueue.length) scheduleNext();
+      }
+    }
+    function scheduleNext() {
+      if (textureInitPtr >= textureInitQueue.length) return;
+      if (typeof window.requestIdleCallback === 'function') {
+        textureInitIdleId = window.requestIdleCallback(() => processNext(), { timeout: 100 });
+      } else {
+        textureInitIdleId = setTimeout(() => processNext(), 16);
+      }
+    }
+    scheduleNext();
+  }
+
+  function scheduleTextureUpgrades() {
+    function processNext() {
+      if (isTextureGenRunning) return;
+      if (textureUpgradePtr >= textureUpgradeQueue.length) return;
+      isTextureGenRunning = true;
+      const item = textureUpgradeQueue[textureUpgradePtr++];
+      if (item.t === 'p') {
+        generatePlanetTextureAsync(
+          star.systemSeed,
+          planetIndex,
+          planet.type,
+          satTexSizes.planet,
+          0,
+          planet.developmentLevel ?? 0,
+          { chunkRows: 12 }
+        ).then((tex) => {
+          planet._texCanvasHigh = tex;
+          if (planet._texCanvasLow && planet._texCanvasLow !== tex) {
+            try { renderer.deleteTextureForCanvas(planet._texCanvasLow); } catch (_) {}
+            planet._texCanvasLow = null;
+          }
+        }).finally(() => {
+          isTextureGenRunning = false;
+          if (textureUpgradePtr < textureUpgradeQueue.length) scheduleNext();
+        });
+      } else {
+        generatePlanetTextureAsync(
+          star.systemSeed,
+          planetIndex,
+          moon.type,
+          satTexSizes.moon,
+          moonIndex + 1,
+          moon.developmentLevel ?? 0,
+          { chunkRows: 12 }
+        ).then((tex) => {
+          moon._texCanvasHigh = tex;
+          if (moon._texCanvasLow && moon._texCanvasLow !== tex) {
+            try { renderer.deleteTextureForCanvas(moon._texCanvasLow); } catch (_) {}
+            moon._texCanvasLow = null;
+          }
+        }).finally(() => {
+          isTextureGenRunning = false;
+          if (textureUpgradePtr < textureUpgradeQueue.length) scheduleNext();
+        });
+      }
+    }
+    function scheduleNext() {
+      if (textureUpgradePtr >= textureUpgradeQueue.length) return;
+      if (typeof window.requestIdleCallback === 'function') {
+        textureUpgradeIdleId = window.requestIdleCallback(() => processNext(), { timeout: 100 });
+      } else {
+        textureUpgradeIdleId = setTimeout(() => processNext(), 16);
+      }
+    }
+    scheduleNext();
+  }
+
   function draw() {
-    window.actionButtons = [];
     const scene = { objects: [], textBatches: [] };
     const now = performance.now();
     const dt = (now - lastUpdateTime) / 1000;
     lastUpdateTime = now;
     const speed = Math.max(0, Number(gameConfig?.ui?.simulationSpeed ?? 1));
-    const sdt = dt * speed;
+    const secondsPerGameHour = Math.max(0.001, Number(gameConfig?.ui?.secondsPerGameHour ?? 1));
+    const hoursDelta = (dt * speed) / secondsPerGameHour;
+    const totalHours = advanceCalendarByHours(hoursDelta);
     gameConfig.ui.simulationPaused = speed === 0; // keep compatibility
+
+    const targetFps = Number(gameConfig?.ui?.targetFps ?? 60);
+    const minFrameMs = 1000 / targetFps;
+    if (speed > 0) {
+      if (now - lastFrameTime < minFrameMs) {
+        animationId = requestAnimationFrame(draw);
+        return;
+      }
+      lastFrameTime = now;
+    }
 
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // Обновляем вращение планеты и луны с множителем скорости
-    planet._rotationOffset += (1 / (planet.dayLength || 24)) * sdt;
-    planet._rotationOffset %= 1;
+    // Обновляем вращение планеты и луны на основе календаря
+    planet._rotationOffset = planet.dayLength ? ((totalHours / planet.dayLength) % 1) : planet._rotationOffset;
     
-    moon._rotationOffset += (1 / (moon.dayLength || 12)) * sdt;
-    moon._rotationOffset %= 1;
+    moon._rotationOffset = moon.dayLength ? ((totalHours / moon.dayLength) % 1) : moon._rotationOffset;
 
-    // Генерируем процедурные текстуры
-    // Для фоновой планеты используем тот же moonIndex = 0, что и в системном виде
-    const satTexSizes = gameConfig.ui?.textureSizes?.satellite ?? { planet: 512, moon: 1024 };
-    const planetTexture = generatePlanetTexture(
-      star.x || (star.id * 1000), 
-      star.y || (star.id * 1000), 
-      planetIndex, // Используем planetIndex для консистентности с системным видом
-      planet.type, 
-      satTexSizes.planet,
-      0, // Явно указываем moonIndex = 0 для консистентности с системным видом
-      planet.developmentLevel ?? 0
-    );
-
-    const moonTexture = generatePlanetTexture(
-      star.x || (star.id * 1000), 
-      star.y || (star.id * 1000), 
-      planetIndex, // Используем planetIndex для консистентности
-      moon.type, 
-      satTexSizes.moon, 
-      moonIndex + 1, // Используем переданный moonIndex + 1
-      moon.developmentLevel ?? 0
-    );
+    const planetTexture = planet._texCanvasHigh || planet._texCanvasLow;
+    const moonTexture = moon._texCanvasHigh || moon._texCanvasLow;
 
     // Massive blurred planet in background (covering most of the screen)
-    const planetColor = hexToRgbArray(planet.color);
+    const planetColor = planetColorCachedMoonView;
     const planetSize = Math.min(canvas.width, canvas.height) * 1.5; // Massive size covering screen
     
     // В детальном виде луны звезда находится далеко, поэтому используем направленный свет
@@ -403,7 +601,7 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
     });
 
     // Moon в центре (увеличенного размера)
-    const moonColor = hexToRgbArray(moon.color);
+    const moonColor = moonColorCachedMoonView;
     const moonSize = Math.max(50, moon.size * 8);
     scene.objects.push({
       type: 'moon2D',
@@ -468,11 +666,31 @@ export function renderMoonScreen(canvas, star, planet, planetIndex, moon, moonIn
     if (renderer) { 
       try { renderer.cleanup(); } catch (e) { console.error('Renderer cleanup error (moon):', e); } 
     }
+    try {
+      if (textureInitIdleId != null) {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(textureInitIdleId);
+        } else {
+          clearTimeout(textureInitIdleId);
+        }
+        textureInitIdleId = null;
+      }
+      if (textureUpgradeIdleId != null) {
+        if (typeof window.cancelIdleCallback === 'function') {
+          window.cancelIdleCallback(textureUpgradeIdleId);
+        } else {
+          clearTimeout(textureUpgradeIdleId);
+        }
+        textureUpgradeIdleId = null;
+      }
+    } catch (_) {}
     window.removeEventListener('resize', onResizeMoon);
     try {
       if (labelsCanvasMoon && labelsCanvasMoon.parentNode) labelsCanvasMoon.parentNode.removeChild(labelsCanvasMoon);
     } catch (e) { console.error('Labels overlay cleanup error (moon):', e); }
   }
+  scheduleTextureInitializations();
+  scheduleTextureUpgrades();
   draw();
   return cleanup;
 }
@@ -523,3 +741,4 @@ function drawBreadcrumb(scene, controls, items) {
     }
   });
 }
+    window.actionButtons = [];

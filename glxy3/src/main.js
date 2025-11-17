@@ -8,6 +8,7 @@ import { renderPlanetScreen, renderMoonScreen } from './ui/PlanetView.js';
 import { clearPlanetTextureCache } from './utils/proceduralTextures.js';
 import { updateBreadcrumbs } from './ui/Breadcrumbs.js';
 import { initSpeedControls } from './ui/SpeedControls.js';
+import { generatePlanetarySystem } from './utils/planetGenerator.js';
 
 const canvas = document.getElementById('galaxy');
 let stars = generateGalaxyMap();
@@ -25,7 +26,16 @@ window.fleetManager = fleetManager;
 window.explorationSystem = explorationSystem;
 
 // Set initial camera position after galaxy generation and fleet initialization
-setGalaxyCamMiddle();
+// Zoom 300% and center on player's starting system
+try {
+  gameConfig.ui.galaxyCamera.scale = 3.0;
+  const startId = (gameConfig.player?.startingSystemId ?? 0);
+  const startStar = stars[startId];
+  setGalaxyCamMiddle(startStar);
+} catch (e) {
+  console.warn('Failed to set initial galaxy camera:', e);
+  setGalaxyCamMiddle();
+}
 
 function clearUI() {
   document.querySelectorAll('button').forEach(b => b.remove());
@@ -177,6 +187,10 @@ function showStarSystem(star) {
     console.error('Error clearing canvas:', e);
   }
   
+  if (!star.planets) {
+    star.planets = generatePlanetarySystem(star.name, star.x, star.y, star.systemSeed);
+  }
+
   const returnToGalaxy = () => showGalaxy(star);
   stopSystemRender = renderStarSystem(
     canvas,

@@ -4,6 +4,7 @@ import { gameConfig } from '../config/gameConfig.js';
 // Simple dropdown state to avoid multiple open menus
 let currentDropdown = null;
 let outsideClickHandlerAttached = false;
+let resizeHandlerAttached = false;
 
 function closeDropdown() {
   if (currentDropdown && currentDropdown.parentNode) {
@@ -154,9 +155,7 @@ export function updateBreadcrumbs({
   onMoonIndex = null,
 } = {}) {
   const container = ensureContainer();
-  // Clear previous content
   container.innerHTML = '';
-  // Close any open dropdown when rerendering
   closeDropdown();
   const args = { star, planetIndex, moonIndex, onGalaxy, onStar, onPlanet, onMoon };
 
@@ -219,10 +218,60 @@ export function updateBreadcrumbs({
     }
   }
 
-  // Render segments with separators
-  segments.forEach((seg, idx) => {
-    const isLast = idx === segments.length - 1;
-    container.appendChild(createSegment(seg.label, seg.onClick, isLast, seg.dropdownItems));
-    if (!isLast) container.appendChild(createSeparator());
-  });
+  function render(segs) {
+    container.innerHTML = '';
+    closeDropdown();
+    segs.forEach((seg, idx) => {
+      const isLast = idx === segs.length - 1;
+      container.appendChild(createSegment(seg.label, seg.onClick, isLast, seg.dropdownItems));
+      if (!isLast) container.appendChild(createSeparator());
+    });
+  }
+
+  function getSpeedPanelRect() {
+    const sp = document.getElementById('sim-speed-panel');
+    return sp ? sp.getBoundingClientRect() : null;
+  }
+
+  function isCollidingWithSpeedPanel() {
+    const bc = container.getBoundingClientRect();
+    const sp = getSpeedPanelRect();
+    if (!sp) return false;
+    const marginX = 10;
+    const marginY = 8;
+    const horiz = (bc.right + marginX) > sp.left && (bc.left) < (sp.right + marginX);
+    const vert = (bc.bottom + marginY) > sp.top && (bc.top) < (sp.bottom + marginY);
+    return horiz && vert;
+  }
+
+  function adjustProgressively() {
+    let cur = segments.map(seg => ({ ...seg }));
+    render(cur);
+    if (!isCollidingWithSpeedPanel()) return;
+    const order = [0, 1, 2];
+    for (const idx of order) {
+      if (idx >= cur.length) continue;
+      cur[idx] = { ...cur[idx], label: '...' };
+      render(cur);
+      if (!isCollidingWithSpeedPanel()) break;
+    }
+  }
+
+  render(segments);
+
+  container._lastArgs = { star, planetIndex, moonIndex, onGalaxy, onStar, onPlanet, onMoon, onPlanetIndex, onMoonIndex };
+
+  if (!resizeHandlerAttached) {
+    window.addEventListener('resize', () => {
+      const a = container._lastArgs || {};
+      updateBreadcrumbs(a);
+    });
+    resizeHandlerAttached = true;
+  }
+
+  try {
+    requestAnimationFrame(() => {
+      adjustProgressively();
+    });
+  } catch (_) {}
 }

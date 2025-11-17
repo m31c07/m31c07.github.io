@@ -117,9 +117,10 @@ export default class WebGLRenderer {
       attribute vec2 aPosition;
       uniform mat4 uProjectionMatrix;
       uniform mat4 uViewMatrix;
+      uniform vec2 uOffset;
       
       void main() {
-        gl_Position = uProjectionMatrix * uViewMatrix * vec4(aPosition, 0.0, 1.0);
+        gl_Position = uProjectionMatrix * uViewMatrix * vec4(aPosition + uOffset, 0.0, 1.0);
       }
     `;
     
@@ -273,6 +274,8 @@ const fsSource = `
   // Daytime city tint
   uniform vec3 uCityDayColor;
   uniform float uCityDayIntensity;
+  uniform float uDepthFactor;
+  uniform float uLightZ;
   
   varying vec2 vLightDirection;
   
@@ -282,7 +285,7 @@ const fsSource = `
     
     // Rotate planet axis to match light direction (restore)
     float axisOffset = 0.0;
-    float axisAngle = atan(vLightDirection.y, vLightDirection.x) + axisOffset;
+    float axisAngle = 0.0;
     float cosR = cos(axisAngle);
     float sinR = sin(axisAngle);
     mat2 rot = mat2(cosR, -sinR, sinR, cosR);
@@ -310,14 +313,20 @@ const fsSource = `
       longitude = mod(longitude, 1.0);
       
       vec2 sphericalTexCoord = vec2(longitude, latitude);
-      vec3 textureColor = texture2D(uTexture, sphericalTexCoord).rgb;
+      vec3 textureColor;
+      if (uUseTexture) {
+        textureColor = texture2D(uTexture, sphericalTexCoord).rgb;
+      } else {
+        textureColor = uColor.rgb;
+      }
       
       vec3 surfaceNormal = normalize(vec3(pScaled.x, pScaled.y, z));
-      vec3 lightDir3D = normalize(vec3(lightRot.x, lightRot.y, 0.3));
+      vec3 lightDir3D = normalize(vec3(lightRot.x, lightRot.y, uLightZ));
       float lightAngle = dot(surfaceNormal, lightDir3D);
       float shading = 0.1 + 0.7 * max(0.0, lightAngle);
       
       finalColor = textureColor * shading;
+      finalColor *= mix(0.85, 1.0, uDepthFactor);
       // Night-side city lights emission and day-side metallic tint
       if (uHasCityMask) {
         // Day mask transitions from 0 (night) to 1 (day) near the terminator
@@ -346,6 +355,7 @@ const fsSource = `
       vec3 rimColor = uColor.rgb;
       finalColor = rimColor * rim;
       finalAlpha = rim * 0.6;
+      finalAlpha *= mix(0.7, 1.0, uDepthFactor);
     }
 
     gl_FragColor = vec4(finalColor, finalAlpha);
@@ -510,11 +520,31 @@ const fsSource = `
       
       // Validate program before use
       if (!program) {
-        console.error('Shader program not initialized for object type:', object.type);
-        return;
+        if (object.type === 'planet2D' || object.type === 'moon2D') {
+          try { this.initPlanet2DShader(); } catch (_) {}
+          program = this.programs.planet2D || this.programs.point;
+        } else if (object.type === 'line' || object.type === 'lineBatch') {
+          try { this.initLineShader(); } catch (_) {}
+          program = this.programs.line || this.programs.point;
+        } else if (object.type === 'glowPoint') {
+          try { this.initGlowPointShader(); } catch (_) {}
+          program = this.programs.glowPoint || this.programs.point;
+        } else if (object.type === 'point' || object.type === 'pointBatch') {
+          try { this.initPointShader(); } catch (_) {}
+          program = this.programs.point;
+        }
+        if (!program) {
+          console.error('Shader program not initialized for object type:', object.type);
+          return;
+        }
       }
       
       this.gl.useProgram(program);
+      const isLine = (object.type === 'line' || object.type === 'lineBatch');
+      if (isLine) {
+        // Ensure orbit lines do not occlude planets/moons drawn later
+        this.gl.depthMask(false);
+      }
       
       // Set common uniforms
       const projLoc = this.gl.getUniformLocation(program, 'uProjectionMatrix');
@@ -522,12 +552,25 @@ const fsSource = `
       
       if (projLoc) this.gl.uniformMatrix4fv(projLoc, false, this.projectionMatrix);
       if (viewLoc) this.gl.uniformMatrix4fv(viewLoc, false, this.viewMatrix);
+      if (object.type === 'line' || object.type === 'lineBatch') {
+        const offsetLoc = this.gl.getUniformLocation(program, 'uOffset');
+        if (offsetLoc) {
+          const ox = object.offset ? object.offset[0] : 0;
+          const oy = object.offset ? object.offset[1] : 0;
+          this.gl.uniform2f(offsetLoc, ox, oy);
+        }
+      }
       
       // Bind vertex data
       let positionLoc = this.gl.getAttribLocation(program, 'aPosition');
       if (object.vertices && positionLoc !== -1) {
-        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
-        this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(object.vertices), this.gl.STATIC_DRAW);
+        if ((object.type === 'line' || object.type === 'lineBatch') && object.staticVertices === true) {
+          const buffer = this.getCachedBuffer(object.vertices);
+          this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+        } else {
+          this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+          this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(object.vertices), this.gl.STATIC_DRAW);
+        }
         this.gl.enableVertexAttribArray(positionLoc);
         this.gl.vertexAttribPointer(positionLoc, 2, this.gl.FLOAT, false, 0, 0);
       } else if (positionLoc !== -1) {
@@ -703,6 +746,16 @@ const fsSource = `
           const rotationOffset = object.rotationOffset || 0.0;
           this.gl.uniform1f(rotationLoc, rotationOffset);
         }
+        const depthLoc = this.gl.getUniformLocation(program, 'uDepthFactor');
+        if (depthLoc) {
+          const df = (object.depthFactor !== undefined) ? object.depthFactor : 1.0;
+          this.gl.uniform1f(depthLoc, df);
+        }
+        const lightZLoc = this.gl.getUniformLocation(program, 'uLightZ');
+        if (lightZLoc) {
+          const lz = (object.lightZ !== undefined) ? object.lightZ : 0.3;
+          this.gl.uniform1f(lightZLoc, lz);
+        }
         
         // Set star and planet positions for lighting calculation
         if (object.type === 'planet2D' || object.type === 'moon2D' ) {
@@ -758,6 +811,7 @@ const fsSource = `
           
           // Restore default blending
           if (isGlow) this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+          if (isLine) { this.gl.depthMask(true); }
         } else {
           // For regular drawArrays
           if (object.vertices && positionLoc !== -1) {
@@ -768,9 +822,11 @@ const fsSource = `
             this.gl.drawArrays(object.drawMode, 0, vertexCount);
             
             if (isGlow) this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+            if (isLine) { this.gl.depthMask(true); }
           } else if (!object.vertices && positionLoc !== -1) {
             // Disable the attribute if no vertices
             this.gl.disableVertexAttribArray(positionLoc);
+            if (isLine) { this.gl.depthMask(true); }
           }
         }
       }
@@ -827,6 +883,22 @@ const fsSource = `
       }
     }
     return texture;
+  }
+
+  deleteTextureForCanvas(canvas) {
+    if (!canvas) return;
+    const tex = this.canvasTextureCache.get(canvas);
+    if (tex) {
+      try { this.gl.deleteTexture(tex); } catch (_) {}
+      this.canvasTextureCache.delete(canvas);
+      this.canvasTextureList.delete(tex);
+    }
+    const mtex = this.cityMaskTextureCache.get(canvas);
+    if (mtex) {
+      try { this.gl.deleteTexture(mtex); } catch (_) {}
+      this.cityMaskTextureCache.delete(canvas);
+      this.cityMaskTextureList.delete(mtex);
+    }
   }
   
   // Cleanup method to release WebGL resources

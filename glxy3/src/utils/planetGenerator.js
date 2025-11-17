@@ -1,34 +1,47 @@
 import { greekLetters, toRoman } from './utils.js';
+import { gameConfig } from '../config/gameConfig.js';
 
-export function generatePlanetarySystem(starName, starX = 0, starY = 0) {
+function createSeededRNG(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+export function generatePlanetarySystem(starName, starX = 0, starY = 0, systemSeed = 0) {
   const system = {
     planets: []
   };
 
-  // Определяем количество планет (3-8)
-  const planetCount = 3 + Math.floor(Math.random() * 6);
+  const minPlanets = Number(gameConfig?.planets?.minPlanets ?? 3);
+  const maxPlanets = Number(gameConfig?.planets?.maxPlanets ?? 8);
+  const rng = createSeededRNG(systemSeed >>> 0);
+  const planetCount = minPlanets + Math.floor(rng() * (maxPlanets - minPlanets + 1));
   
   // Keep track of the outer boundary of each planet system (planet + its moons)
   let lastSystemOuterBoundary = 0;
   
   // Генерируем планеты
   for (let i = 0; i < planetCount; i++) {
-    const hasRings = Math.random() < 0.3; // 30% chance for rings
-    const moonCount = Math.floor(Math.random() * 4); // 0-3 moons
-    const axialTilt = (Math.random() - 0.5) * Math.PI * 0.167; // Random axial tilt ±15 degrees (±π/12)
+    const ringChance = Number(gameConfig?.planets?.ringChance ?? 0.3);
+    const hasRings = rng() < ringChance;
+    const hasMoons = rng() < Number(gameConfig?.planets?.moonChance ?? 0.7);
+    const moonCount = hasMoons ? Math.floor(rng() * 4) : 0;
+    const axialTilt = (rng() - 0.5) * Math.PI * 0.167;
     
     // Generate deterministic day length based on planet properties
-    const dayLength = generateDayLength(starX, starY, i);
+    const dayLength = generateDayLength(systemSeed, i);
     
     // Generate planet size first
-    const planetSize = 5 + Math.random() * 10;
+    const planetSize = 5 + rng() * 10;
     
     // Calculate orbit radius with guaranteed spacing from previous systems
     const minOrbitRadius = Math.max(80 + i * 70, lastSystemOuterBoundary + 20);
-    const orbitRadius = minOrbitRadius + (Math.random() * 20);
+    const orbitRadius = minOrbitRadius + (rng() * 20);
     // Скорость орбиты трактуем как радианы в игровой час
     const orbitSpeed = (1.2 * Math.pow(0.7, i)) / 15;
-    const planetType = getPlanetType(i, planetCount);
+    const planetType = getPlanetType(i, planetCount, rng);
     
     // Create planet object (moons will be generated next)
     const planet = {
@@ -38,18 +51,18 @@ export function generatePlanetarySystem(starName, starX = 0, starY = 0) {
       size: planetSize,
       orbitRadius: orbitRadius,
       orbitSpeed: orbitSpeed,
-      tilt: Math.random() * 0.2,
+      tilt: rng() * 0.2,
       axialTilt: axialTilt,
-      initialOrbitAngle: generateInitialOrbitAngle(starX, starY, i),
-      color: getPlanetColor(planetType),
+      initialOrbitAngle: generateInitialOrbitAngle(systemSeed, i),
+      color: getPlanetColor(planetType, rng),
       dayLength: dayLength,
       moons: [],
-      rings: hasRings ? generateRings(axialTilt) : null,
-      habitable: i === Math.floor(planetCount/2) && Math.random() < 0.7
+      rings: hasRings ? generateRings(axialTilt, 120, createSeededRNG((systemSeed ^ ((i + 1) * 0x9e3779b9)) >>> 0)) : null,
+      habitable: i === Math.floor(planetCount/2) && rng() < 0.7
     };
     
     // Generate moons with proper spacing
-    planet.moons = generateMoonsWithProperSpacing(moonCount, starX, starY, i, planetType, planet.name, planet.size);
+    planet.moons = generateMoonsWithProperSpacing(moonCount, systemSeed, i, planetType, planet.name, planet.size);
     
     // Calculate the outer boundary of this planet system (planet + its furthest moon)
     let systemOuterBoundary = planet.orbitRadius + planet.size;
@@ -71,8 +84,9 @@ export function generatePlanetarySystem(starName, starX = 0, starY = 0) {
   return system;
 }
 
-function generateMoonsWithProperSpacing(count, starX, starY, planetIndex, planetType, planetName, planetSize) {
+function generateMoonsWithProperSpacing(count, systemSeed, planetIndex, planetType, planetName, planetSize) {
   const moons = [];
+  const rng = createSeededRNG((systemSeed ^ ((planetIndex + 1) * 0x9e3779b9)) >>> 0);
   
   // Descriptive prefixes based on moon type
   const typePrefixes = {
@@ -92,14 +106,14 @@ function generateMoonsWithProperSpacing(count, starX, starY, planetIndex, planet
   let lastMoonBoundary = planetSize + 5; // Start moons at least 5 units from planet center
   
   for (let i = 0; i < count; i++) {
-    const moonType = getMoonType(i, planetType, starX, starY);
+    const moonType = getMoonType(i, planetType, rng);
     
     // Generate name based on moon type and position
     let moonName;
     if (count === 1) {
       // For single moons, use descriptive name with planet name
       const prefixes = typePrefixes[moonType] || typePrefixes['rocky'];
-      const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+      const prefix = prefixes[Math.floor(rng() * prefixes.length)];
       moonName = `${prefix} ${planetName}`;
     } else {
       // For multiple moons, use Greek letters with planet name
@@ -108,14 +122,14 @@ function generateMoonsWithProperSpacing(count, starX, starY, planetIndex, planet
     }
     
     // Generate deterministic day length for moon
-    const dayLength = generateDayLength(starX, starY, planetIndex * 10 + i);
+    const dayLength = generateDayLength(systemSeed, planetIndex * 10 + i);
     
     // Generate moon size
-    const moonSize = 1 + Math.random() * 3;
+    const moonSize = 1 + rng() * 3;
     
     // Calculate orbit radius with guaranteed spacing from previous moons
     const minOrbitRadius = lastMoonBoundary + moonSize + 3; // 3 units minimum spacing
-    const orbitRadius = minOrbitRadius + Math.random() * 3;
+    const orbitRadius = minOrbitRadius + rng() * 3;
     
     // Update boundary for next moon
     lastMoonBoundary = orbitRadius + moonSize;
@@ -127,9 +141,9 @@ function generateMoonsWithProperSpacing(count, starX, starY, planetIndex, planet
       size: moonSize,
       orbitRadius: orbitRadius,
       orbitSpeed: orbitSpeed,
-      initialOrbitAngle: generateInitialOrbitAngle(starX, starY, planetIndex * 10 + i),
+      initialOrbitAngle: generateInitialOrbitAngle(systemSeed, planetIndex * 10 + i),
       type: moonType,
-      color: getPlanetColor(moonType),
+      color: getPlanetColor(moonType, rng),
       name: moonName,
       dayLength: dayLength,
       _rotationOffset: 0,
@@ -139,10 +153,10 @@ function generateMoonsWithProperSpacing(count, starX, starY, planetIndex, planet
   return moons;
 }
 
-function generateRings(axialTilt = 0, steps = 120) {
-  const innerRadius = 1.2 + Math.random() * 0.5;  // 1.2-1.7
-  const outerRadius = 2.0 + Math.random() * 1.5;  // 2.0-3.5
-  const color = `rgba(200, 180, 150, ${0.6 + Math.random() * 0.3})`;
+function generateRings(axialTilt = 0, steps = 120, rng) {
+  const innerRadius = 1.2 + rng() * 0.5;
+  const outerRadius = 2.0 + rng() * 1.5;
+  const color = `rgba(200, 180, 150, ${0.6 + rng() * 0.3})`;
 
   // Генерируем фиксированные параметры полосок кольца
   const ringData = [];
@@ -150,10 +164,10 @@ function generateRings(axialTilt = 0, steps = 120) {
     const t = i / steps;
     ringData.push({
       t,
-      alpha: 0.2 * (1 - t * t) + Math.random() * 0.05,
-      lineWidth: 1 + Math.random() * 1.5,
-      lightStripe: Math.random() < 0.05,
-      darkStripe: Math.random() < 0.03
+      alpha: 0.2 * (1 - t * t) + rng() * 0.05,
+      lineWidth: 1 + rng() * 1.5,
+      lightStripe: rng() < 0.05,
+      darkStripe: rng() < 0.03
     });
   }
 
@@ -167,38 +181,18 @@ function generateRings(axialTilt = 0, steps = 120) {
 }
 
 
-// Generate deterministic initial orbit angle based on star coordinates and object index
-function generateInitialOrbitAngle(starX, starY, objectIndex) {
-  // Create a seed from star coordinates and object index
-  const seed = (Math.floor(starX * 1000) * 31 + Math.floor(starY * 1000) * 17 + objectIndex * 7) % 2147483647;
-  
-  // Simple seeded random function
-  const seededRandom = () => {
-    const x = Math.sin(seed + objectIndex * 12345) * 10000;
-    return x - Math.floor(x);
-  };
-  
-  // Return angle in radians (0 to 2π)
-  return seededRandom() * Math.PI * 2;
+function generateInitialOrbitAngle(systemSeed, objectIndex) {
+  const r = createSeededRNG(((systemSeed ^ (objectIndex * 0x9e3779b9)) >>> 0));
+  return r() * Math.PI * 2;
 }
 
-// Generate deterministic day length based on star coordinates and object index
-function generateDayLength(starX, starY, objectIndex) {
-  // Create a seed from star coordinates and object index
-  const seed = (Math.floor(starX * 1000) * 31 + Math.floor(starY * 1000) * 17 + objectIndex * 7) % 2147483647;
-  
-  // Simple seeded random function for day length (between 10 and 100 hours)
-  const seededRandom = () => {
-    const x = Math.sin(seed + objectIndex * 12345) * 10000;
-    return x - Math.floor(x);
-  };
-  
-  // Return day length in hours (10-100 hours)
-  return 10 + Math.floor(seededRandom() * 91);
+function generateDayLength(systemSeed, objectIndex) {
+  const r = createSeededRNG(((systemSeed ^ (objectIndex * 0x9e3779b9)) >>> 0));
+  return 10 + Math.floor(r() * 91);
 }
 
 // Вспомогательные функции для типов и цветов
-function getPlanetType(position, total) {
+function getPlanetType(position, total, rng) {
   const types = ['lava', 'rocky', 'terran', 'gas', 'ice', 'desert', 'ocean', 'toxic', 'crystal', 'volcanic'];
   const probabilities = [
     [0.4, 0.25, 0.05, 0.0, 0.0, 0.2, 0.0, 0.1, 0.0, 0.0],  // Близкие к звезде - больше лавы, пустынь, токсичных
@@ -209,7 +203,7 @@ function getPlanetType(position, total) {
   ];
   
   const zone = Math.min(Math.floor(position / (total / 5)), 4);
-  const rnd = Math.random();
+  const rnd = rng();
   let acc = 0;
   
   for (let i = 0; i < types.length; i++) {
@@ -219,7 +213,7 @@ function getPlanetType(position, total) {
   return types[types.length - 1];
 }
 
-function getPlanetColor(planetType) {
+function getPlanetColor(planetType, rng) {
   const colors = {
     lava: ['#ff3300', '#ff5500', '#cc2200'],
     rocky: ['#996633', '#887755', '#aa8866'],
@@ -233,17 +227,10 @@ function getPlanetColor(planetType) {
     volcanic: ['#ff6600', '#ee5500', '#dd4400'] // Оранжево-красные вулканы
   };
   const palette = colors[planetType] || colors.rocky;
-  return palette[Math.floor(Math.random() * palette.length)];
+  return palette[Math.floor(rng() * palette.length)];
 }
 
-function getMoonType(moonIndex, planetType, starX, starY) {
-  // Create deterministic random for moon type based on position and index
-  const seed = Math.abs(Math.floor(starX * 1000) * 31 + Math.floor(starY * 1000) * 17 + moonIndex * 13);
-  let seedState = seed;
-  const seededRandom = () => {
-    seedState = (seedState * 1664525 + 1013904223) % 4294967296;
-    return seedState / 4294967296;
-  };
+function getMoonType(moonIndex, planetType, rng) {
   
   // Use the same types as planets
   const types = ['lava', 'rocky', 'terran', 'gas', 'ice', 'desert', 'ocean', 'toxic', 'crystal', 'volcanic'];
@@ -263,7 +250,7 @@ function getMoonType(moonIndex, planetType, starX, starY) {
   };
   
   const planetProbs = probabilities[planetType] || probabilities['rocky'];
-  const rnd = seededRandom();
+  const rnd = rng();
   let acc = 0;
   
   for (let i = 0; i < types.length; i++) {
@@ -271,16 +258,5 @@ function getMoonType(moonIndex, planetType, starX, starY) {
     if (rnd < acc) return types[i];
   }
   return types[0];
-}
-
-export function getRandomSpectralType() {
-  const types = ['O', 'B', 'A', 'F', 'G', 'K', 'M'];
-  const weights = [0.00003, 0.13, 0.6, 3, 7.6, 12.1, 76.45]; // Реальные распределения звезд
-  let rnd = Math.random() * 100;
-  for (let i = 0; i < types.length; i++) {
-    if (rnd < weights[i]) return types[i];
-    rnd -= weights[i];
-  }
-  return 'M';
 }
 

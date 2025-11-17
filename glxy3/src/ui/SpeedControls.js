@@ -1,5 +1,6 @@
 // src/ui/SpeedControls.js
 import { gameConfig } from '../config/gameConfig.js';
+import { computeTotalHours } from '../utils/utils.js';
 
 function ensurePanel() {
   let el = document.getElementById('sim-speed-panel');
@@ -15,14 +16,15 @@ function ensurePanel() {
     el.style.color = '#fff';
     el.style.fontFamily = 'Arial, sans-serif';
     el.style.fontSize = '14px';
-    el.style.lineHeight = '1';
+    el.style.lineHeight = '1.2';
     el.style.backdropFilter = 'blur(3px)';
     el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.35)';
     el.style.zIndex = '10001';
     el.style.pointerEvents = 'auto';
-    el.style.display = 'inline-flex';
-    el.style.alignItems = 'center';
-    el.style.gap = '6px';
+    el.style.display = 'flex';
+    el.style.flexDirection = 'column';
+    el.style.alignItems = 'stretch';
+    el.style.gap = '4px';
     document.body.appendChild(el);
   } else {
     // Clear previous buttons if any were removed by clearUI()
@@ -68,7 +70,39 @@ function updateActive(container, speedVal) {
 
 export function initSpeedControls() {
   const panel = ensurePanel();
+  if (panel._dateTimerId) { try { clearInterval(panel._dateTimerId); } catch (e) {} panel._dateTimerId = null; }
   const current = Number(gameConfig.ui.simulationSpeed ?? 1);
+
+  const dateLine = document.createElement('div');
+  dateLine.id = 'sim-speed-date';
+  dateLine.style.display = 'flex';
+  dateLine.style.alignItems = 'center';
+  dateLine.style.justifyContent = 'flex-start';
+  dateLine.style.color = '#fff';
+  dateLine.style.opacity = '0.95';
+  dateLine.style.whiteSpace = 'nowrap';
+  dateLine.style.userSelect = 'none';
+
+  function formatCalendar() {
+    const cal = gameConfig.calendar;
+    const y = Number(cal.year ?? 0);
+    const m = Number(cal.month ?? 0);
+    const d = Number(cal.day ?? 0);
+    const h = Number(cal.hour ?? 0);
+    const mpY = Number(cal.monthsPerYear ?? 12);
+    const dpM = Number(cal.daysPerMonth ?? 30);
+    const hpD = Number(cal.hoursPerDay ?? 24);
+    const mm = String(m + 1).padStart(2, '0');
+    const dd = String(d + 1).padStart(2, '0');
+    const hh = String(Math.floor(h % hpD)).padStart(2, '0');
+    const yy = String(y + 1);
+    return `Дата: ${yy}.${mm}.${dd}, ${hh}:00`;
+  }
+
+  function updateDateLine() {
+    void computeTotalHours();
+    dateLine.textContent = formatCalendar();
+  }
 
   const pauseBtn = makeButton('⏸', 'Пауза', 0);
   const slowBtn = makeButton('⏪︎', 'Медленно (0.3×)', 0.3);
@@ -76,11 +110,21 @@ export function initSpeedControls() {
   const fastBtn = makeButton('⏩︎', 'Быстро (2×)', 2);
   const vfastBtn = makeButton('⏭', 'Очень быстро (5×)', 5);
 
-  panel.appendChild(pauseBtn);
-  panel.appendChild(slowBtn);
-  panel.appendChild(normalBtn);
-  panel.appendChild(fastBtn);
-  panel.appendChild(vfastBtn);
+  const buttonsRow = document.createElement('div');
+  buttonsRow.style.display = 'inline-flex';
+  buttonsRow.style.alignItems = 'center';
+  buttonsRow.style.gap = '6px';
 
-  updateActive(panel, current);
+  buttonsRow.appendChild(pauseBtn);
+  buttonsRow.appendChild(slowBtn);
+  buttonsRow.appendChild(normalBtn);
+  buttonsRow.appendChild(fastBtn);
+  buttonsRow.appendChild(vfastBtn);
+
+  panel.appendChild(dateLine);
+  panel.appendChild(buttonsRow);
+
+  updateActive(buttonsRow, current);
+  updateDateLine();
+  panel._dateTimerId = setInterval(updateDateLine, 250);
 }

@@ -338,9 +338,8 @@ class BiomeSystem {
 
 // Improved universal planet texture generator
 export class ProceduralPlanetTexture {
-  constructor(starX, starY, planetIndex, planetType, textureSize = 512, moonIndex = 0, developmentLevel = 0) {
-    // Deterministic seed from star position, planet index, and optional moon index
-    this.seed = this.createSeed(starX, starY, planetIndex, moonIndex);
+  constructor(systemSeed, planetIndex, planetType, textureSize = 512, moonIndex = 0, developmentLevel = 0) {
+    this.seed = this.createSeed(systemSeed, planetIndex, moonIndex);
     this.planetType = planetType;
     this.textureSize = textureSize;
     this.noise = new SimplexNoise(this.seed);
@@ -353,12 +352,11 @@ export class ProceduralPlanetTexture {
     this.biomes = new BiomeSystem(this.typeParams);
   }
 
-  createSeed(starX, starY, planetIndex, moonIndex = 0) {
-    // Create deterministic seed from coordinates and identifiers
-    const x = Math.floor(starX * 1000) % 10000;
-    const y = Math.floor(starY * 1000) % 10000;
-    const m = (moonIndex || 0) % 1000;
-    return (x * 31 + y * 17 + planetIndex * 7 + m * 13) % 2147483647;
+  createSeed(systemSeed, planetIndex, moonIndex = 0) {
+    const p = (planetIndex + 1) >>> 0;
+    const m = (moonIndex >>> 0);
+    const seed = ((systemSeed >>> 0) ^ (p * 0x9e3779b9) ^ ((m + 1) * 0x85ebca6b)) >>> 0;
+    return seed;
   }
 
   createSeededRNG(seed) {
@@ -507,11 +505,11 @@ generateTexture() {
 // ----------------------
 const textureCache = new Map();
 
-export function generatePlanetTexture(starX, starY, planetIndex, planetType, size=512, moonIndex=0, developmentLevel=0){
-  const cacheKey = `${Math.floor(starX*1000)}_${Math.floor(starY*1000)}_${planetIndex}_${moonIndex}_${planetType}_${size}_${developmentLevel}`;
+export function generatePlanetTexture(systemSeed, planetIndex, planetType, size=512, moonIndex=0, developmentLevel=0){
+  const cacheKey = `${systemSeed >>> 0}_${planetIndex}_${moonIndex}_${planetType}_${size}_${developmentLevel}`;
   if(textureCache.has(cacheKey)) return textureCache.get(cacheKey);
 
-  const generator = new ProceduralPlanetTexture(starX, starY, planetIndex, planetType, size, moonIndex, developmentLevel);
+  const generator = new ProceduralPlanetTexture(systemSeed, planetIndex, planetType, size, moonIndex, developmentLevel);
   const texture = generator.generateTexture();
   textureCache.set(cacheKey, texture);
   return texture;
@@ -519,4 +517,104 @@ export function generatePlanetTexture(starX, starY, planetIndex, planetType, siz
 
 export function clearPlanetTextureCache(){
   try { textureCache.clear(); } catch(e){ console.error('Failed to clear planet texture cache:', e); }
+}
+
+export function generatePlanetTextureAsync(systemSeed, planetIndex, planetType, size=512, moonIndex=0, developmentLevel=0, opts={}){
+  const cacheKey = `${systemSeed >>> 0}_${planetIndex}_${moonIndex}_${planetType}_${size}_${developmentLevel}`;
+  if(textureCache.has(cacheKey)) return Promise.resolve(textureCache.get(cacheKey));
+  const chunkRows = Math.max(4, Number(opts.chunkRows || 12));
+  const generator = new ProceduralPlanetTexture(systemSeed, planetIndex, planetType, size, moonIndex, developmentLevel);
+  const textureData = new Uint8Array(size * size * 4);
+  const cityMask = new Uint8Array(size * size);
+  let y = 0;
+  function processChunk(){
+    const yEnd = Math.min(size, y + chunkRows);
+    const polarCapSize = generator.typeParams.polarCapSize;
+    const waterLevel = generator.typeParams.waterLevel;
+    const cfg = generator.typeParams.relief;
+    for(let yy=y; yy<yEnd; yy++){
+      const lat = (yy / size) * Math.PI;
+      const latToEquator = Math.min(lat, Math.PI - lat) / (Math.PI / 2);
+      const latN = latToEquator;
+      for(let x=0; x<size; x++){
+        const lon = (x / size) * 2 * Math.PI;
+        const sx = Math.sin(lat) * Math.cos(lon);
+        const sy = Math.sin(lat) * Math.sin(lon);
+        const sz = Math.cos(lat);
+        const cont = fbm3D(generator.noise, sx * cfg.continentsFreq, sy * cfg.continentsFreq, sz * cfg.continentsFreq, cfg.continentsOctaves, 2.0, cfg.continentsGain);
+        const contN = clamp(cont / 1.5, -1.0, 1.0);
+        const mRaw = fbm3D(generator.noise, sx * cfg.mountainFreq, sy * cfg.mountainFreq, sz * cfg.mountainFreq, cfg.mountainOctaves, 2.0, cfg.mountainGain);
+        const mR = ridged(mRaw);
+        let h = contN + mR * 0.9 * Math.max(0.0, contN);
+        const eqBulge = (1.0 - latN) * 0.05;
+        h += eqBulge;
+        const elev = clamp(h, -1.0, 1.0);
+        const index = yy * size + x;
+        const pix = index * 4;
+        const nx = Math.sin(lat) * Math.cos(lon);
+        const ny = Math.sin(lat) * Math.sin(lon);
+        const nz = Math.cos(lat);
+        const noiseVal = generator.noise.noise3D(nx * 6.0, ny * 6.0, nz * 6.0) * 0.5 + 0.5;
+        const noiseAmplitude = polarCapSize * 0.35;
+        const polarThreshold = polarCapSize + (noiseVal - 0.5) * noiseAmplitude;
+        const distanceFromPole = Math.min(lat, Math.PI - lat) / Math.PI;
+        const hasPolar = distanceFromPole < polarThreshold && generator.planetType !== 'gas';
+        const elevN = elev - waterLevel;
+        const biomeColor = generator.biomes.colorFor(elevN, latN, noiseVal);
+        const color = hasPolar ? [240, 240, 255] : biomeColor;
+        textureData[pix] = color[0];
+        textureData[pix + 1] = color[1];
+        textureData[pix + 2] = color[2];
+        textureData[pix + 3] = 255;
+        const biomeName = generator.biomes.dominantBiomeName(elevN, latN);
+        const noCitiesBiomes = (generator.typeParams && generator.typeParams.noCitiesBiomes) ? generator.typeParams.noCitiesBiomes : [];
+        const biomeAllowed = biomeName ? !noCitiesBiomes.includes(biomeName) : true;
+        const isLand = elevN >= 0.0 && generator.planetType !== 'gas' && biomeAllowed;
+        if (isLand && generator.developmentLevel > 0) {
+          const nearCoast = smoothstep(0.0, 0.12, Math.abs(elevN));
+          const midLatPref = smoothstep(0.2, 0.8, latN) * (1.0 - smoothstep(0.7, 1.0, latN));
+          const ruggedness = smoothstep(0.3, 0.7, elevN);
+          const suitability = clamp(0.6 * nearCoast + 0.3 * midLatPref + 0.1 * (1.0 - ruggedness), 0.0, 1.0);
+          const cityNoise = generator.noise.noise3D(nx * 24.0, ny * 24.0, nz * 24.0) * 0.5 + 0.5;
+          const threshold = 1.0 - (generator.developmentLevel * suitability);
+          const city = cityNoise > threshold ? 255 : 0;
+          cityMask[index] = city;
+        } else {
+          cityMask[index] = 0;
+        }
+      }
+    }
+    y = yEnd;
+  }
+  return new Promise((resolve) => {
+    function step(){
+      processChunk();
+      if (y < size){
+        if (typeof window.requestIdleCallback === 'function') {
+          window.requestIdleCallback(step, { timeout: 100 });
+        } else {
+          setTimeout(step, 8);
+        }
+      } else {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const imageData = ctx.createImageData(size, size);
+        imageData.data.set(textureData);
+        ctx.putImageData(imageData, 0, 0);
+        canvas._isStaticTexture = true;
+        canvas._cityMask = cityMask;
+        canvas._developmentLevel = generator.developmentLevel;
+        canvas._seed = generator.seed;
+        textureCache.set(cacheKey, canvas);
+        resolve(canvas);
+      }
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(step, { timeout: 100 });
+    } else {
+      setTimeout(step, 8);
+    }
+  });
 }

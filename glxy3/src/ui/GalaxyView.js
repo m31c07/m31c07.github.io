@@ -1,7 +1,7 @@
 import { gameConfig } from '../config/gameConfig.js';
 import { CanvasControls } from './CanvasControls.js';
 import WebGLRenderer from '../renderers/WebGLRenderer.js';
-import { hexToRgbArray } from '../utils/utils.js';
+import { hexToRgbArray, advanceCalendarByHours } from '../utils/utils.js';
 
 // Cache for text batch optimization (static variables)
 // Text rendering removed
@@ -11,6 +11,19 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
   
   // Initialize WebGL renderer with better error handling
   let renderer;
+  let cachedStaticElements = null;
+  let staticElementsDirty = true;
+  const blinkingStars = new Set();
+  let blinkTimer = 0;
+  let animationFrameId;
+  let selectedStar = null;
+  let lastFrameTime = 0;
+  let starsLookupMap = new Map();
+  let lastCameraState = null;
+  let lastUpdateTime = performance.now();
+  let labelsRenderList = null;
+  let labelsRenderPtr = 0;
+  let labelsNeedsRebuild = true;
   // Canvas для подписей звёзд (оверлей 2D поверх WebGL)
   let labelsCanvas = null;
   let labelsCtx = null;
@@ -38,6 +51,9 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
       labelsCanvas.width = canvas.width;
       labelsCanvas.height = canvas.height;
     }
+    staticElementsDirty = true;
+    lastCameraState = null;
+    try { draw(); } catch (_) {}
   }
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
@@ -60,11 +76,17 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     const controls = new CanvasControls(canvas, stars, {
       renderer,
       width, height,
-      onPan: () => { /* рендер-петля сама отработает изменения камеры */ },
-      onZoom: () => { /* рендер-петля сама отработает изменения камеры */ },
+      onPan: () => {},
+      onZoom: () => {},
       onStarClick: (star) => handleStarClick(star),
       onEmptySpaceClick: () => handleEmptySpaceClick(),
       cameraKey: 'galaxyCamera',
+      panBounds: {
+        centerX: width / 2,
+        centerY: height / 2,
+        limit: Math.max(0, Number(gameConfig?.galaxy?.outerRadius ?? 0) * 1.0)
+      },
+      zoomLimits: gameConfig?.ui?.zoomLimits || { min: 0.01, max: 2.0 },
       initialState: {
         offsetX: gameConfig.ui.galaxyCamera.offsetX,
         offsetY: gameConfig.ui.galaxyCamera.offsetY,
@@ -81,22 +103,15 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
   // Get exploration hash for cache invalidation
   // Text rendering removed
   
-  // Static elements cache
-  let cachedStaticElements = null;
-  let staticElementsDirty = true;
   
-  // Animation state
-  const blinkingStars = new Set();
-  let blinkTimer = 0;
-  let animationFrameId;
-  let selectedStar = null;
-  let lastFrameTime = 0;
-  let starsLookupMap = new Map();
-  let lastCameraState = null;
   
   // Build lookup map for performance
   stars.forEach(star => {
     starsLookupMap.set(star.id, star);
+    if (!star._spectralColor) {
+      const c = hexToRgbArray(getStarColor(star.spectralType));
+      star._spectralColor = c;
+    }
   });
   
   // Handle star clicks with exploration logic
@@ -120,9 +135,9 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
   // Main optimized draw function
   function draw() {
     const currentTime = performance.now();
-    
-    // Frame limiting (60 FPS) - improved to reduce resource usage
-    if (currentTime - lastFrameTime < 16.66) {
+    const targetFps = Number(gameConfig?.ui?.targetFps ?? 60);
+    const minFrameMs = 1000 / targetFps;
+    if (currentTime - lastFrameTime < minFrameMs) {
       return;
     }
     lastFrameTime = currentTime;
@@ -136,12 +151,14 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
       Math.abs(lastCameraState.scale - scale) > 0.001;
     
     // Only render if camera changed
-    if (!cameraChanged) {
+    if (!cameraChanged && labelsRenderList && labelsRenderPtr < (labelsRenderList?.length || 0)) {
+      drawStarLabels();
       return;
     }
     if (cameraChanged) {
       lastCameraState = { offsetX, offsetY, scale };
       staticElementsDirty = true;
+      labelsNeedsRebuild = true;
     }
     
     // Clear action buttons
@@ -277,6 +294,8 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
   // Restored: draw hyperlanes with simple frustum culling
   function drawHyperlanesOptimized(scene) {
     const { offsetX, offsetY, scale } = controls.getCameraState();
+    const minScale = Number(gameConfig?.ui?.hyperlaneZoomHideThreshold ?? 0.3);
+    if (scale <= minScale) return;
 
     const viewWidth = canvas.width / scale;
     const viewHeight = canvas.height / scale;
@@ -349,28 +368,58 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
           }
         }
 
-        // Determine star color
         let color;
-        if (star.owner != null) {
-          const baseColor = hexToRgbArray(gameConfig.empireColors[star.owner]);
-          color = [
+        if (star.explored) {
+          const baseColor = star._spectralColor || hexToRgbArray(getStarColor(star.spectralType));
+          const t = scale < 1 ? 0.5 : Math.min(1, (scale - 1) / 1);
+          const spectral = [
             baseColor[0] * brightness,
             baseColor[1] * brightness,
             baseColor[2] * brightness,
             1.0
           ];
-        } else if (star.explored) {
-          // const alpha = Math.min(brightness / 1.5, 1);
-          color = [1.0, 1.0, 1.0, 1];
+          const white = [1.0, 1.0, 1.0, 1.0];
+          color = [
+            white[0] + (spectral[0] - white[0]) * t,
+            white[1] + (spectral[1] - white[1]) * t,
+            white[2] + (spectral[2] - white[2]) * t,
+            1.0
+          ];
         } else {
-          // const alpha = Math.min(brightness / 3, 0.6);
           color = [0.4, 0.4, 0.4, 1];
         }
         
         // Add star to batch
         starVertices.push(star.x, star.y);
         starColors.push(...color);
-        starSizes.push(5 * scale); // scale-dependent star size
+        const starSizePx = 5 * scale;
+        starSizes.push(starSizePx); // scale-dependent star size
+
+        // Ownership ring around owned stars (empire color)
+        if (star.owner != null) {
+          const segments = 24;
+          const empireColor = hexToRgbArray(gameConfig.empireColors[star.owner]);
+          const starRadiusPx = starSizePx ;
+          const ringRadiusPx = (starRadiusPx) ;
+          const ringRadiusWorld = starSizePx / scale;
+          const ringVerts = [];
+          for (let i = 0; i < segments; i++) {
+            const a1 = (i / segments) * Math.PI * 2;
+            const a2 = ((i + 1) / segments) * Math.PI * 2;
+            const x1 = star.x + Math.cos(a1) * ringRadiusWorld;
+            const y1 = star.y + Math.sin(a1) * ringRadiusWorld;
+            const x2 = star.x + Math.cos(a2) * ringRadiusWorld;
+            const y2 = star.y + Math.sin(a2) * ringRadiusWorld;
+            ringVerts.push(x1, y1, x2, y2);
+          }
+          scene.objects.push({
+            type: 'lineBatch',
+            vertices: ringVerts,
+            vertexCount: ringVerts.length / 2,
+            drawMode: renderer.gl.LINES,
+            color: empireColor
+          });
+        }
       }
     });
     
@@ -412,17 +461,58 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     }
   }
 
+  function getStarColor(spectralType) {
+    const spectralColors = {
+      'O': '#9bb0ff',
+      'B': '#aabfff',
+      'A': '#cad7ff',
+      'F': '#f8f7ff',
+      'G': '#fff4ea',
+      'K': '#ffd2a1',
+      'M': '#ffad51'
+    };
+    return spectralColors[spectralType] || spectralColors['G'];
+  }
+
   // Подписи звёзд на 2D-оверлее
   function drawStarLabels() {
     if (!labelsCtx) return;
-    // Очищаем оверлей
-    labelsCtx.clearRect(0, 0, labelsCanvas.width, labelsCanvas.height);
+    const firstChunk = labelsNeedsRebuild;
+    if (firstChunk) {
+      labelsCtx.clearRect(0, 0, labelsCanvas.width, labelsCanvas.height);
+    }
     const { offsetX, offsetY, scale } = controls.getCameraState();
-    // Порог видимости подписей
+    {
+      const levels = Array.isArray(gameConfig?.ui?.zoomLevels) && gameConfig.ui.zoomLevels.length > 0
+        ? gameConfig.ui.zoomLevels
+        : [0.1, 0.15, 0.2, 0.3, 0.5, 0.8, 1.0, 1.3, 1.6, 2.0];
+      let closest = levels[0];
+      let diff = Math.abs(scale - closest);
+      for (let i = 1; i < levels.length; i++) {
+        const d = Math.abs(scale - levels[i]);
+        if (d < diff) { diff = d; closest = levels[i]; }
+      }
+      const idx = Math.max(0, levels.indexOf(closest));
+      const pct = Math.round(scale * 100);
+      const text = `Zoom L${idx + 1} (${pct}%)`;
+      const fontSize = 12;
+      const padding = 8;
+      labelsCtx.font = `${fontSize}px Arial`;
+      const w = Math.ceil(labelsCtx.measureText(text).width) + padding * 2;
+      const h = fontSize + padding * 2;
+      const x = labelsCanvas.width - w - 16;
+      const y = labelsCanvas.height - h - 16;
+      labelsCtx.fillStyle = 'rgba(0,0,0,0.55)';
+      labelsCtx.fillRect(x, y, w, h);
+      labelsCtx.fillStyle = '#FFFFFF';
+      labelsCtx.fillText(text, x + padding, y + h / 2);
+    }
     if (!gameConfig.ui.showStarLabels || scale < gameConfig.ui.starLabelZoomThreshold) {
+      labelsRenderList = null;
+      labelsRenderPtr = 0;
+      labelsNeedsRebuild = true;
       return;
     }
-    // Рассчитываем видимую область в мировых координатах
     const viewWidth = canvas.width / scale;
     const viewHeight = canvas.height / scale;
     const viewLeft = -offsetX / scale;
@@ -430,36 +520,53 @@ export function renderGalaxy(canvas, stars, explorationSystem, fleetManager, onS
     const viewRight = viewLeft + viewWidth;
     const viewBottom = viewTop + viewHeight;
     const margin = 80;
-
-    // Настройки текста
     labelsCtx.font = '12px Arial';
     labelsCtx.textAlign = 'left';
-    // Обходим только видимые звёзды
-    for (const star of stars) {
-      if (star.x >= viewLeft - margin && star.x <= viewRight + margin &&
-          star.y >= viewTop - margin && star.y <= viewBottom + margin) {
-        const sx = star.x * scale + offsetX;
-        const sy = star.y * scale + offsetY;
-        const label = star.name || gameConfig.exploration.unexploredSystemName;
-        // Цвет текста: белый для исследованных, серый для неизвестных, цвет империи если есть владелец
-        let color = '#FFFFFF';
-        if (star.owner != null) {
-          color = gameConfig.empireColors[star.owner] || '#FFFFFF';
-        } else if (!star.explored) {
-          color = 'rgba(200,200,200,0.85)';
+    if (labelsNeedsRebuild) {
+      const list = [];
+      for (const star of stars) {
+        if (star.x >= viewLeft - margin && star.x <= viewRight + margin &&
+            star.y >= viewTop - margin && star.y <= viewBottom + margin) {
+          list.push(star);
         }
-        // Лёгкая тень для читаемости
-        labelsCtx.fillStyle = 'rgba(0,0,0,0.6)';
-        labelsCtx.fillText(label, sx + 8 + 1, sy - 10 + 1);
-        labelsCtx.fillStyle = color;
-        labelsCtx.fillText(label, sx + 8, sy - 10);
       }
+      labelsRenderList = list;
+      labelsRenderPtr = 0;
+      labelsNeedsRebuild = false;
     }
+    if (!labelsRenderList || labelsRenderList.length === 0) return;
+    const maxPerFrame = 150;
+    const end = Math.min(labelsRenderList.length, labelsRenderPtr + maxPerFrame);
+    for (let i = labelsRenderPtr; i < end; i++) {
+      const star = labelsRenderList[i];
+      const sx = star.x * scale + offsetX;
+      const sy = star.y * scale + offsetY;
+      const label = star.name || gameConfig.exploration.unexploredSystemName;
+      let color = '#FFFFFF';
+      if (star.owner != null) {
+        color = gameConfig.empireColors[star.owner] || '#FFFFFF';
+      } else if (!star.explored) {
+        color = 'rgba(200,200,200,0.85)';
+      }
+      labelsCtx.fillStyle = 'rgba(0,0,0,0.6)';
+      labelsCtx.fillText(label, sx + 9, sy - 9);
+      labelsCtx.fillStyle = color;
+      labelsCtx.fillText(label, sx + 8, sy - 10);
+    }
+    labelsRenderPtr = end;
   }
 
   // Запуск анимации - OPTIMIZED with frame limiting
   function renderLoop() {
-    draw(); // draw() now handles its own frame limiting
+    const now = performance.now();
+    const dt = (now - lastUpdateTime) / 1000;
+    lastUpdateTime = now;
+    const speed = Math.max(0, Number(gameConfig?.ui?.simulationSpeed ?? 1));
+    const secondsPerGameHour = Math.max(0.001, Number(gameConfig?.ui?.secondsPerGameHour ?? 1));
+    const hoursDelta = (dt * speed) / secondsPerGameHour;
+    advanceCalendarByHours(hoursDelta);
+    gameConfig.ui.simulationPaused = speed === 0;
+    draw();
     animationFrameId = requestAnimationFrame(renderLoop);
   }
   

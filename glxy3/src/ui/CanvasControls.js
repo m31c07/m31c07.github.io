@@ -17,6 +17,8 @@ export class CanvasControls {
     this.zoomLimits = options.zoomLimits || { min: 0.1, max: 2 };
     this.cameraKey = options.cameraKey || 'galaxyCamera';
     this.panBounds = options.panBounds || null;
+    this.disablePan = !!options.disablePan;
+    this.disableZoom = !!options.disableZoom;
     
     const camState = gameConfig.ui[this.cameraKey];
     
@@ -214,6 +216,7 @@ export class CanvasControls {
 
   _onMouseMove(e) {
     if (!this.dragging) return;
+    if (this.disablePan) return;
     
     const dx = e.clientX - this.lastX;
     const dy = e.clientY - this.lastY;
@@ -239,6 +242,7 @@ export class CanvasControls {
 
   _onWheel(e) {
     e.preventDefault();
+    if (this.disableZoom) return;
 
     // Check if we're over the celestial menu and handle scrolling there first
     if (gameConfig.ui.currentView === 'starsystem' && gameConfig.ui.celestialMenu) {
@@ -292,15 +296,16 @@ export class CanvasControls {
       this.lastX = this.startX = e.touches[0].clientX;
       this.lastY = this.startY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
-      this._handlePinchStart(e);
+      if (!this.disableZoom) this._handlePinchStart(e);
     }
   }
 
   _onTouchMove(e) {
     if (e.touches.length === 2) {
-      this._handlePinchMove(e);
+      if (!this.disableZoom) this._handlePinchMove(e);
     } else if (this.dragging && e.touches.length === 1) {
       e.preventDefault();
+      if (this.disablePan) return;
       const dx = e.touches[0].clientX - this.lastX;
       const dy = e.touches[0].clientY - this.lastY;
       this.lastX = e.touches[0].clientX;

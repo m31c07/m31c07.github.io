@@ -1,14 +1,14 @@
 export const gameConfig = {
   galaxy: {
-    starCount: 750,                     // Общее количество звёзд
-    mapSize: { width: 5000, height: 5000 }, // Размер карты
+    starCount: 150000,                     // Общее количество звёзд
+    mapSize: { width: 200000, height: 200000 }, // Размер карты
     innerRadius: 600,                   // Радиус внутренней пустоты
-    outerRadius: 2400,                  // Внешний радиус галактики
+    outerRadius: 55400,                  // Внешний радиус галактики
     coreRadius: 1500,                   // Радиус максимальной плотности
     densityPower: 2.5,                  // Степень резкости убывания плотности
     minStarDistance: 40,                // Минимальное расстояние между звёздами
     maxLinksPerStar: 4,                 // Максимальное число гиперкоридоров у звезды
-    linkRadius: 400,                    // Максимальная длина гиперкоридора
+    linkRadius: 200,                    // Максимальная длина гиперкоридора
     corridorChances: {                  // Распределение вероятности числа гиперкоридоров
       1: 0.05,
       2: 0.1,
@@ -16,6 +16,15 @@ export const gameConfig = {
       4: 0.2,
       5: 0.05
     },
+  },
+  calendar: {
+    monthsPerYear: 12,
+    daysPerMonth: 30,
+    hoursPerDay: 24,
+    year: 0,
+    month: 0,
+    day: 0,
+    hour: 0
   },
   ui: {
     currentView: null, // 'galaxy', 'starsystem', 'planet', 'satellite'
@@ -26,10 +35,11 @@ export const gameConfig = {
     simulationSpeed: 1,
     // Совместимость: флаг паузы (деривируется от скорости)
     simulationPaused: false,
+    targetFps: 60,
     secondsPerGameHour: 5, // сколько реальных секунд составляет 1 игровой час
     // Отображение подписей звёзд в галактическом режиме
     showStarLabels: true,
-    starLabelZoomThreshold: 0.8, // показывать названия при масштабе камеры >= порога
+    starLabelZoomThreshold: 2.0, // показывать названия при масштабе камеры >= порога
     // Отображение подписей в системном и детальных режимах
     showSystemPlanetLabels: true,
     showSystemMoonLabels: true,
@@ -38,6 +48,9 @@ export const gameConfig = {
     planetScreenLabelZoomThreshold: 0.5,
     showMoonScreenLabels: true,
     moonScreenLabelZoomThreshold: 0.5,
+    zoomLevels: [0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.8, 1.0, 1.3, 1.6, 2.0, 2.3, 2.6, 3.0],
+    zoomLimits: { min: 0.01, max: 5.0 },
+    hyperlaneZoomHideThreshold: 0.6,
     // Размеры процедурных текстур для разных экранов
     textureSizes: {
       // Системный вид звёздной системы
