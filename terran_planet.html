@@ -103,7 +103,7 @@
       const size = parseInt(params.get('size') || '512', 10);
       let dev = 0.1;
       const dayLength = parseFloat(params.get('dayLength') || '24');
-      const secPerHour = parseFloat(params.get('secPerHour') || '0.00000001');
+      const secPerHour = parseFloat(params.get('secPerHour') || '1');
       let sim = parseFloat(params.get('sim') || '1');
       const orbitSpeed = parseFloat(params.get('orbitSpeed') || '0.03');
       const dirScale = parseFloat(params.get('dirScale') || '0.7');
