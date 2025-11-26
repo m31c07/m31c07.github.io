@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Терран планета</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; }
+      #planetCanvas { width: 100vw; height: 100vh; display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="planetCanvas"></canvas>
+    <script>
+      const canvas = document.getElementById('planetCanvas');
+      const gl = canvas.getContext('webgl', { alpha: false, depth: true, antialias: true });
+      if (!gl) { alert('WebGL unsupported'); throw new Error('WebGL unsupported'); }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      function setSize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; gl.viewport(0,0,canvas.width,canvas.height); }
+      setSize();
+      window.addEventListener('resize', setSize);
+
+      function c(shaderType, src){ const s = gl.createShader(shaderType); gl.shaderSource(s, src); gl.compileShader(s); if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){ throw new Error(gl.getShaderInfoLog(s)); } return s; }
+      function p(vs, fs){ const pr = gl.createProgram(); gl.attachShader(pr, vs); gl.attachShader(pr, fs); gl.linkProgram(pr); if(!gl.getProgramParameter(pr, gl.LINK_STATUS)){ throw new Error(gl.getProgramInfoLog(pr)); } return pr; }
+
+      const vsSource = "\nattribute vec2 aPosition;\nuniform mat4 uProjectionMatrix;\nuniform mat4 uViewMatrix;\nuniform float uPointSize;\nuniform vec2 uStarPosition;\nuniform vec2 uPlanetPosition;\nvarying vec2 vLightDirection;\nvoid main(){\n  gl_Position = uProjectionMatrix * uViewMatrix * vec4(aPosition, 0.0, 1.0);\n  gl_PointSize = uPointSize;\n  vec2 lightDir = normalize(uStarPosition - uPlanetPosition);\n  vLightDirection = lightDir;\n}";
+
+      const fsSource = "\nprecision mediump float;\nuniform vec4 uColor;\nuniform sampler2D uTexture;\nuniform bool uUseTexture;\nuniform float uRotationOffset;\nuniform float uPlanetEdge;\nuniform bool uHasCityMask;\nuniform sampler2D uCityMask;\nuniform vec3 uCityColor;\nuniform float uCityIntensity;\nuniform vec3 uCityDayColor;\nuniform float uCityDayIntensity;\nuniform float uDepthFactor;\nuniform float uLightZ;\nvarying vec2 vLightDirection;\nvoid main(){\n  vec2 p = gl_PointCoord * 2.0 - 1.0;\n  float r = length(p);\n  if (r > 1.0) { discard; }\n  vec3 finalColor;\n  float finalAlpha;\n  vec2 lightRot = vLightDirection;\n  if (r <= uPlanetEdge) {\n    vec2 pScaled = p / uPlanetEdge;\n    float rScaled2 = dot(pScaled, pScaled);\n    float z = sqrt(max(0.0, 1.0 - rScaled2));\n    float longitude = atan(pScaled.x, z) / (2.0 * 3.14159265) + 0.5;\n    float latitude = asin(pScaled.y / sqrt(pScaled.x * pScaled.x + pScaled.y * pScaled.y + z * z)) / 3.14159265 + 0.5;\n    longitude += uRotationOffset;\n    longitude = mod(longitude, 1.0);\n    vec2 sphericalTexCoord = vec2(longitude, latitude);\n    vec3 textureColor;\n    if (uUseTexture) {\n      textureColor = texture2D(uTexture, sphericalTexCoord).rgb;\n    } else {\n      textureColor = uColor.rgb;\n    }\n    vec3 surfaceNormal = normalize(vec3(pScaled.x, pScaled.y, z));\n    vec3 lightDir3D = normalize(vec3(lightRot.x, lightRot.y, uLightZ));\n    float lightAngle = dot(surfaceNormal, lightDir3D);\n    float shading = 0.1 + 0.7 * max(0.0, lightAngle);\n    finalColor = textureColor * shading;\n    finalColor *= mix(0.85, 1.0, uDepthFactor);\n    if (uHasCityMask) {\n      float dayMask = smoothstep(0.0, 0.2, lightAngle);\n      float nightMask = 1.0 - dayMask;\n      float city = texture2D(uCityMask, sphericalTexCoord).r;\n      float emissive = city * nightMask * uCityIntensity;\n      finalColor += uCityColor * emissive;\n      float dayTint = city * dayMask * uCityDayIntensity;\n      finalColor = mix(finalColor, uCityDayColor, clamp(dayTint, 0.0, 1.0));\n    }\n    finalAlpha = uColor.a;\n  } else {\n    float t = clamp((r - uPlanetEdge) / (1.0 - uPlanetEdge), 0.0, 1.0);\n    float rim = 1.0 - t;\n    rim = smoothstep(0.0, 1.0, rim);\n    float lightAngle2D = dot(normalize(p), normalize(lightRot));\n    float visibility = smoothstep(-1.8, 0.1, lightAngle2D);\n    rim *= visibility;\n    rim = pow(rim, 2.0);\n    vec3 rimColor = uColor.rgb;\n    finalColor = rimColor * rim;\n    finalAlpha = rim * 0.6;\n    finalAlpha *= mix(0.7, 1.0, uDepthFactor);\n  }\n  gl_FragColor = vec4(finalColor, finalAlpha);\n}";
+
+      const program = p(c(gl.VERTEX_SHADER, vsSource), c(gl.FRAGMENT_SHADER, fsSource));
+      gl.useProgram(program);
+
+      const aPosition = gl.getAttribLocation(program, 'aPosition');
+      const posBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0]), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(aPosition);
+      gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+
+      const uProjectionMatrix = gl.getUniformLocation(program, 'uProjectionMatrix');
+      const uViewMatrix = gl.getUniformLocation(program, 'uViewMatrix');
+      const proj = new Float32Array(16); const view = new Float32Array(16);
+      proj[0]=1; proj[5]=1; proj[10]=1; proj[15]=1; view[0]=1; view[5]=1; view[10]=1; view[15]=1;
+      gl.uniformMatrix4fv(uProjectionMatrix, false, proj);
+      gl.uniformMatrix4fv(uViewMatrix, false, view);
+
+      function createTextureFromCanvas(canvas) {
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+        return tex;
+      }
+
+      function createCityMaskTextureFromCanvas(canvas) {
+        const data = canvas && canvas._cityMask; if (!canvas || !data) return null;
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, canvas.width, canvas.height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+        return tex;
+      }
+
+      function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+      function lerp(a,b,t){ return a + (b - a) * t; }
+      function smoothstep(edge0, edge1, x){ const t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0); return t * t * (3 - 2 * t); }
+      function lerpColorRGB(a,b,t){ return [ Math.round(lerp(a[0],b[0],t)), Math.round(lerp(a[1],b[1],t)), Math.round(lerp(a[2],b[2],t)) ]; }
+
+      function seededRNG(seed){ return function(){ seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }; }
+      function makePerm(seed){ const rng = seededRNG(seed); const p=[]; const perm=[]; const permMod12=[]; for(let i=0;i<256;i++){ p[i]=Math.floor(rng()*256); } for(let i=0;i<512;i++){ perm[i]=p[i & 255]; permMod12[i]=perm[i]%12; } return {perm,permMod12}; }
+      const grad3=[[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+      function dot3(g,x,y,z){ return g[0]*x + g[1]*y + g[2]*z; }
+      function noise3DFactory(seed){ const {perm,permMod12}=makePerm(seed); return function(x,y,z){ let n0,n1,n2,n3; const s=(x+y+z)*(1.0/3.0); const i=Math.floor(x+s); const j=Math.floor(y+s); const k=Math.floor(z+s); const t=(i+j+k)*(1.0/6.0); const X0=i-t; const Y0=j-t; const Z0=k-t; const x0=x-X0; const y0=y-Y0; const z0=z-Z0; let i1,j1,k1,i2,j2,k2; if(x0>=y0){ if(y0>=z0){ i1=1;j1=0;k1=0;i2=1;j2=1;k2=0; } else if(x0>=z0){ i1=1;j1=0;k1=0;i2=1;j2=0;k2=1; } else { i1=0;j1=0;k1=1;i2=1;j2=0;k2=1; } } else { if(y0<z0){ i1=0;j1=0;k1=1;i2=0;j2=1;k2=1; } else if(x0<z0){ i1=0;j1=1;k1=0;i2=0;j2=1;k2=1; } else { i1=0;j1=1;k1=0;i2=1;j2=1;k2=0; } } const x1=x0-i1+(1.0/6.0); const y1=y0-j1+(1.0/6.0); const z1=z0-k1+(1.0/6.0); const x2=x0-i2+(2.0/6.0); const y2=y0-j2+(2.0/6.0); const z2=z0-k2+(2.0/6.0); const x3=x0-1.0+(3.0/6.0); const y3=y0-1.0+(3.0/6.0); const z3=z0-1.0+(3.0/6.0); const ii=i&255; const jj=j&255; const kk=k&255; const gi0=permMod12[ii + perm[jj + perm[kk]]]; const gi1=permMod12[ii + i1 + perm[jj + j1 + perm[kk + k1]]]; const gi2=permMod12[ii + i2 + perm[jj + j2 + perm[kk + k2]]]; const gi3=permMod12[ii + 1 + perm[jj + 1 + perm[kk + 1]]]; let t0=0.6 - x0*x0 - y0*y0 - z0*z0; if(t0<0) n0=0.0; else { t0*=t0; n0=t0*t0*dot3(grad3[gi0],x0,y0,z0); } let t1=0.6 - x1*x1 - y1*y1 - z1*z1; if(t1<0) n1=0.0; else { t1*=t1; n1=t1*t1*dot3(grad3[gi1],x1,y1,z1); } let t2=0.6 - x2*x2 - y2*y2 - z2*z2; if(t2<0) n2=0.0; else { t2*=t2; n2=t2*t2*dot3(grad3[gi2],x2,y2,z2); } let t3=0.6 - x3*x3 - y3*y3 - z3*z3; if(t3<0) n3=0.0; else { t3*=t3; n3=t3*t3*dot3(grad3[gi3],x3,y3,z3); } return 32.0*(n0+n1+n2+n3); }; }
+
+      function fbm3D(noise,x,y,z,octaves,lacunarity,gain){ let amp=1.0; let freq=1.0; let sum=0.0; for(let i=0;i<octaves;i++){ sum+=amp*noise(x*freq,y*freq,z*freq); freq*=lacunarity; amp*=gain; } return sum; }
+      function ridged(v){ v = 1.0 - Math.abs(v); return v*v; }
+
+      const TERRAN_CFG = { waterLevel: 0.0, polarCapSize: 0.07, relief: { continentsFreq: 0.75, continentsGain: 0.55, continentsOctaves: 4, mountainFreq: 3.0, mountainGain: 0.6, mountainOctaves: 3 }, biomes: [ { name:'ocean', elev:[-1.0,-0.02], color:[40,110,180], noiseTint:0.15 }, { name:'shore', elev:[-0.02,0.02], color:[220,210,160], noiseTint:0.10 }, { name:'grassland', elev:[0.02,0.25], color:[70,140,60], noiseTint:0.15 }, { name:'forest', elev:[0.08,0.35], color:[50,110,50], noiseTint:0.20 }, { name:'swamp', elev:[0.0,0.15], lat:[0.3,0.8], color:[70,90,50], noiseTint:0.15 }, { name:'desert', elev:[0.0,0.2], lat:[0.0,0.3], color:[210,185,130], noiseTint:0.15 }, { name:'highlands', elev:[0.25,0.45], color:[140,120,100], noiseTint:0.10 }, { name:'mountain', elev:[0.45,1.0], color:[110,110,120], noiseTint:0.25 }, { name:'snow', elev:[0.55,1.0], lat:[0.4,1.0], color:[240,240,255], noiseTint:0.05 } ] };
+
+      function biomeCandidates(cfg,elevN,latN){ const arr=cfg.biomes; const out=[]; for(const b of arr){ const emin=(b.elev?b.elev[0]:-1), emax=(b.elev?b.elev[1]:1); const lmin=(b.lat?b.lat[0]:0), lmax=(b.lat?b.lat[1]:1); if(elevN>=emin && elevN<=emax && latN>=lmin && latN<=lmax){ out.push(b); } } return out.length?out:arr; }
+      function blendByElevation(cands,elevN){ const scored=cands.map(b=>{ const emin=(b.elev?b.elev[0]:-1), emax=(b.elev?b.elev[1]:1); const center=(emin+emax)*0.5; const dist=Math.abs(elevN-center); return {b,dist}; }).sort((a,b)=>a.dist-b.dist); const b1=scored[0].b; const b2=scored[1]?scored[1].b:b1; const e1=(b1.elev?b1.elev:[-1,1]); const e2=(b2.elev?b2.elev:[-1,1]); const center1=(e1[0]+e1[1])*0.5; const center2=(e2[0]+e2[1])*0.5; const d1=Math.abs(elevN-center1); const d2=Math.abs(elevN-center2); const t=d1+d2>0?clamp(d2/(d1+d2),0,1):0.5; return {b1,b2,t}; }
+      function biomeColor(cfg,elevN,latN,noiseTintVal){ const cands=biomeCandidates(cfg,elevN,latN); const r=blendByElevation(cands,elevN); const base=lerpColorRGB(r.b1.color,r.b2.color,r.t); const tintAmount=(r.b1.noiseTint + r.b2.noiseTint)*0.5; const factor=1.0 + (noiseTintVal - 0.5) * tintAmount; return [ clamp(Math.round(base[0]*factor),0,255), clamp(Math.round(base[1]*factor),0,255), clamp(Math.round(base[2]*factor),0,255) ]; }
+      function dominantBiomeName(cfg,elevN,latN){ const cands=biomeCandidates(cfg,elevN,latN); const r=blendByElevation(cands,elevN); return r.b1 && r.b1.name ? r.b1.name : null; }
+
+      function generateTerranTexture(systemSeed, planetIndex, size, developmentLevel){ const p=(planetIndex+1)>>>0; const seed=((systemSeed>>>0) ^ (p*0x9e3779b9))>>>0; const noise=noise3DFactory(seed); const cfg=TERRAN_CFG.relief; const elevation=new Float32Array(size*size); for(let y=0;y<size;y++){ const lat=(y/size)*Math.PI; const latN=Math.min(lat,Math.PI-lat)/(Math.PI/2); for(let x=0;x<size;x++){ const lon=(x/size)*2*Math.PI; const sx=Math.sin(lat)*Math.cos(lon); const sy=Math.sin(lat)*Math.sin(lon); const sz=Math.cos(lat); const cont=fbm3D(noise,sx*cfg.continentsFreq,sy*cfg.continentsFreq,sz*cfg.continentsFreq,cfg.continentsOctaves,2.0,cfg.continentsGain); const contN=clamp(cont/1.5,-1.0,1.0); const mRaw=fbm3D(noise,sx*cfg.mountainFreq,sy*cfg.mountainFreq,sz*cfg.mountainFreq,cfg.mountainOctaves,2.0,cfg.mountainGain); const mR=ridged(mRaw); let h=contN + mR * 0.9 * Math.max(0.0, contN); const eqBulge=(1.0 - latN) * 0.05; h+=eqBulge; elevation[y*size + x]=clamp(h,-1.0,1.0); } } const textureData=new Uint8Array(size*size*4); const cityMask=new Uint8Array(size*size); const polarCapSize=TERRAN_CFG.polarCapSize; const waterLevel=TERRAN_CFG.waterLevel; for(let y=0;y<size;y++){ const lat=(y/size)*Math.PI; const latToEquator=Math.min(lat,Math.PI-lat)/(Math.PI/2); const latN=latToEquator; for(let x=0;x<size;x++){ const index=y*size + x; const pix=index*4; const elev=elevation[index]; const lon=(x/size)*2*Math.PI; const nx=Math.sin(lat)*Math.cos(lon); const ny=Math.sin(lat)*Math.sin(lon); const nz=Math.cos(lat); const noiseVal=noise(nx*6.0, ny*6.0, nz*6.0) * 0.5 + 0.5; const noiseAmplitude=polarCapSize * 0.35; const polarThreshold=polarCapSize + (noiseVal - 0.5) * noiseAmplitude; const distanceFromPole=Math.min(lat, Math.PI - lat) / Math.PI; const hasPolar=distanceFromPole < polarThreshold; const elevN=elev - waterLevel; const biomeCol=biomeColor(TERRAN_CFG, elevN, latN, noiseVal); const color=hasPolar ? [240,240,255] : biomeCol; textureData[pix]=color[0]; textureData[pix+1]=color[1]; textureData[pix+2]=color[2]; textureData[pix+3]=255; const biomeName=dominantBiomeName(TERRAN_CFG, elevN, latN); const noCitiesBiomes=[]; const biomeAllowed=biomeName ? !noCitiesBiomes.includes(biomeName) : true; const isLand=elevN>=0.0 && biomeAllowed; if(isLand && developmentLevel>0){ const nearCoast=smoothstep(0.0,0.12,Math.abs(elevN)); const midLatPref=smoothstep(0.2,0.8,latN) * (1.0 - smoothstep(0.7,1.0,latN)); const ruggedness=smoothstep(0.3,0.7,elevN); const suitability=clamp(0.6*nearCoast + 0.3*midLatPref + 0.1*(1.0 - ruggedness), 0.0, 1.0); const cityNoise=noise(nx*24.0, ny*24.0, nz*24.0) * 0.5 + 0.5; const threshold=1.0 - (developmentLevel * suitability); const city=cityNoise > threshold ? 255 : 0; cityMask[index]=city; } else { cityMask[index]=0; } } } const texCanvas=document.createElement('canvas'); texCanvas.width=size; texCanvas.height=size; const ctx=texCanvas.getContext('2d',{willReadFrequently:true}); const imageData=ctx.createImageData(size,size); imageData.data.set(textureData); ctx.putImageData(imageData,0,0); texCanvas._isStaticTexture=true; texCanvas._cityMask=cityMask; return texCanvas; }
+
+      const params = new URLSearchParams(window.location.search);
+      const seedParam = params.get('seed');
+      let seedParsed = parseInt(seedParam ?? '', 10);
+      const seed = Number.isFinite(seedParsed)
+        ? seedParsed
+        : (typeof crypto !== 'undefined' && crypto.getRandomValues
+            ? crypto.getRandomValues(new Uint32Array(1))[0] >>> 0
+            : Math.floor(Math.random() * 4294967295) >>> 0);
+      const planetIndex = parseInt(params.get('planetIndex') || '0', 10);
+      const size = parseInt(params.get('size') || '512', 10);
+      let dev = 0.1;
+      const dayLength = parseFloat(params.get('dayLength') || '24');
+      const secPerHour = parseFloat(params.get('secPerHour') || '0.00000001');
+      let sim = parseFloat(params.get('sim') || '1');
+      const orbitSpeed = parseFloat(params.get('orbitSpeed') || '0.03');
+      const dirScale = parseFloat(params.get('dirScale') || '0.7');
+      const sx = parseFloat(params.get('sx'));
+      const sy = parseFloat(params.get('sy'));
+      const cityIntensity = parseFloat(params.get('cityIntensity') || '1.0');
+      const cityDayIntensity = parseFloat(params.get('cityDayIntensity') || '0.25');
+
+      let textureCanvas = generateTerranTexture(seed, planetIndex, size, dev);
+      let textureGL = createTextureFromCanvas(textureCanvas);
+      let cityMaskGL = createCityMaskTextureFromCanvas(textureCanvas);
+
+      const uColor = gl.getUniformLocation(program, 'uColor');
+      const uUseTexture = gl.getUniformLocation(program, 'uUseTexture');
+      const uTexture = gl.getUniformLocation(program, 'uTexture');
+      const uRotationOffset = gl.getUniformLocation(program, 'uRotationOffset');
+      const uPlanetEdge = gl.getUniformLocation(program, 'uPlanetEdge');
+      const uHasCityMask = gl.getUniformLocation(program, 'uHasCityMask');
+      const uCityMask = gl.getUniformLocation(program, 'uCityMask');
+      const uCityColor = gl.getUniformLocation(program, 'uCityColor');
+      const uCityIntensity = gl.getUniformLocation(program, 'uCityIntensity');
+      const uCityDayColor = gl.getUniformLocation(program, 'uCityDayColor');
+      const uCityDayIntensity = gl.getUniformLocation(program, 'uCityDayIntensity');
+      const uPointSize = gl.getUniformLocation(program, 'uPointSize');
+      const uStarPosition = gl.getUniformLocation(program, 'uStarPosition');
+      const uPlanetPosition = gl.getUniformLocation(program, 'uPlanetPosition');
+      const uDepthFactor = gl.getUniformLocation(program, 'uDepthFactor');
+      const uLightZ = gl.getUniformLocation(program, 'uLightZ');
+
+      function hexToRGBAFloat(hex){ const r=parseInt(hex.slice(1,3),16)/255; const g=parseInt(hex.slice(3,5),16)/255; const b=parseInt(hex.slice(5,7),16)/255; return new Float32Array([r,g,b,0.9]); }
+      function seededPaletteIndex(systemSeed, planetIndex, len){ const s = ((systemSeed>>>0) ^ (((planetIndex+1)>>>0) * 0x9e3779b9)) >>> 0; const r = (s * 1664525 + 1013904223) >>> 0; return (r % len); }
+      const TERRAN_COLORS = ['#0066cc', '#0088ee', '#0055aa'];
+      const colorParam = params.get('color');
+      const baseHex = colorParam ? colorParam : TERRAN_COLORS[ seededPaletteIndex(seed, planetIndex, TERRAN_COLORS.length) ];
+      gl.uniform4fv(uColor, hexToRGBAFloat(baseHex));
+      gl.uniform1i(uUseTexture, 1);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, textureGL);
+      gl.uniform1i(uTexture, 0);
+      const hasCity = !!cityMaskGL; gl.uniform1i(uHasCityMask, hasCity ? 1 : 0);
+      if (hasCity) { gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, cityMaskGL); gl.uniform1i(uCityMask, 1); gl.uniform3fv(uCityColor, new Float32Array([1.0,0.85,0.6])); gl.uniform1f(uCityIntensity, cityIntensity); gl.uniform3fv(uCityDayColor, new Float32Array([0.75,0.75,0.78])); gl.uniform1f(uCityDayIntensity, cityDayIntensity); }
+
+      const planetEdge = 0.7; gl.uniform1f(uPlanetEdge, planetEdge);
+
+      let rotationOffset = 0;
+      let orbitProgress = 0;
+      let totalHours = 0;
+      let lastTime = performance.now();
+
+      function percent(v){ return `${Math.round(clamp(v,0,1)*100)}%`; }
+      function regenerate(){ const oldTex=textureGL; const oldCity=cityMaskGL; textureCanvas = generateTerranTexture(seed, planetIndex, size, dev); textureGL = createTextureFromCanvas(textureCanvas); cityMaskGL = createCityMaskTextureFromCanvas(textureCanvas); if (oldTex) { try { gl.deleteTexture(oldTex); } catch(_){} } if (oldCity) { try { gl.deleteTexture(oldCity); } catch(_){} } }
+
+      function ensurePanel(){ let el=document.getElementById('sim-speed-panel'); if(!el){ el=document.createElement('div'); el.id='sim-speed-panel'; el.style.position='fixed'; el.style.top='10px'; el.style.right='12px'; el.style.padding='6px 8px'; el.style.borderRadius='10px'; el.style.background='rgba(18,20,24,0.6)'; el.style.color='#fff'; el.style.fontFamily='Arial, sans-serif'; el.style.fontSize='14px'; el.style.lineHeight='1.2'; el.style.backdropFilter='blur(3px)'; el.style.boxShadow='0 2px 6px rgba(0,0,0,0.35)'; el.style.zIndex='10001'; el.style.pointerEvents='auto'; el.style.display='flex'; el.style.flexDirection='column'; el.style.alignItems='stretch'; el.style.gap='4px'; document.body.appendChild(el);} else { el.innerHTML=''; } return el; }
+      function makeButton(label,title,value){ const btn=document.createElement('button'); btn.textContent=label; btn.title=title; btn.setAttribute('data-value', String(value)); btn.style.cursor='pointer'; btn.style.padding='2px 2px'; btn.style.borderRadius='5px'; btn.style.border='1px solid rgba(255,255,255,0.25)'; btn.style.background='rgba(36,64,100,0.65)'; btn.style.color='#fff'; btn.style.fontSize='14px'; btn.style.lineHeight='1'; btn.style.width='20px'; btn.style.userSelect='none'; btn.style.outline='none'; btn.style.boxShadow='0 1px 3px rgba(0,0,0,0.25)'; btn.addEventListener('click', (e)=>{ e.stopPropagation(); const val=Number(btn.getAttribute('data-value')); sim=val; updateActive(btn.parentElement, val); }); return btn; }
+      function updateActive(container, speedVal){ [...container.querySelectorAll('button')].forEach(b=>{ const isActive=Number(b.getAttribute('data-value'))===speedVal; b.style.background=isActive?'rgba(72,110,160,0.9)':'rgba(36,64,100,0.65)'; b.style.borderColor=isActive?'rgba(255,255,255,0.45)':'rgba(255,255,255,0.25)'; }); }
+      const panel=ensurePanel();
+      const dateLine=document.createElement('div'); dateLine.id='sim-speed-date'; dateLine.style.display='flex'; dateLine.style.alignItems='center'; dateLine.style.justifyContent='flex-start'; dateLine.style.color='#fff'; dateLine.style.opacity='0.95'; dateLine.style.whiteSpace='nowrap'; dateLine.style.userSelect='none';
+      function formatCalendar(){ const mpY=12, dpM=30, hpD=24; const h=totalHours; const y=Math.floor(h/(mpY*dpM*hpD)); const remY=h - y*(mpY*dpM*hpD); const m=Math.floor(remY/(dpM*hpD)); const remM=remY - m*(dpM*hpD); const d=Math.floor(remM/hpD); const hh=Math.floor(remM - d*hpD); const mm=String(m+1).padStart(2,'0'); const dd=String(d+1).padStart(2,'0'); const hhStr=String(hh).padStart(2,'0'); const yy=String(y+1); return `Дата: ${yy}.${mm}.${dd}, ${hhStr}:00`; }
+      function updateDateLine(){ dateLine.textContent = formatCalendar(); }
+      const pauseBtn=makeButton('⏸','Пауза',0); const slowBtn=makeButton('⏪︎','Медленно (0.3x)',0.3); const normalBtn=makeButton('▶','Нормально (1x)',1); const fastBtn=makeButton('⏩︎','Быстро (2x)',2); const vfastBtn=makeButton('⏭','Очень быстро (5x)',5);
+      const buttonsRow=document.createElement('div'); buttonsRow.style.display='inline-flex'; buttonsRow.style.alignItems='center'; buttonsRow.style.gap='6px'; buttonsRow.appendChild(pauseBtn); buttonsRow.appendChild(slowBtn); buttonsRow.appendChild(normalBtn); buttonsRow.appendChild(fastBtn); buttonsRow.appendChild(vfastBtn);
+      panel.appendChild(dateLine); panel.appendChild(buttonsRow); updateActive(buttonsRow, sim);
+
+      const devRow=document.createElement('div'); devRow.style.display='inline-flex'; devRow.style.alignItems='center'; devRow.style.gap='6px';
+      
+      const incBtn=document.createElement('button'); incBtn.textContent='+'; incBtn.title='Увеличить развитие'; incBtn.style.cursor='pointer'; incBtn.style.padding='2px 8px'; incBtn.style.borderRadius='5px'; incBtn.style.border='1px solid rgba(255,255,255,0.25)'; incBtn.style.background='rgba(36,64,100,0.65)'; incBtn.style.color='#fff'; incBtn.style.fontSize='14px'; incBtn.style.lineHeight='1'; incBtn.style.userSelect='none'; incBtn.style.outline='none'; incBtn.style.boxShadow='0 1px 3px rgba(0,0,0,0.25)';
+      const devLabel=document.createElement('div'); devLabel.textContent=`Lvl:${percent(dev)}`; devLabel.style.color='#fff'; devLabel.style.opacity='0.95'; devLabel.style.whiteSpace='nowrap'; devLabel.style.userSelect='none'; devLabel.style.padding='2px 6px'; devLabel.style.border='1px solid rgba(255,255,255,0.15)'; devLabel.style.borderRadius='5px'; devLabel.style.background='rgba(18,20,24,0.4)';
+      const decBtn=document.createElement('button'); decBtn.textContent='-'; decBtn.title='Уменьшить развитие'; decBtn.style.cursor='pointer'; decBtn.style.padding='2px 8px'; decBtn.style.borderRadius='5px'; decBtn.style.border='1px solid rgba(255,255,255,0.25)'; decBtn.style.background='rgba(36,64,100,0.65)'; decBtn.style.color='#fff'; decBtn.style.fontSize='14px'; decBtn.style.lineHeight='1'; decBtn.style.userSelect='none'; decBtn.style.outline='none'; decBtn.style.boxShadow='0 1px 3px rgba(0,0,0,0.25)';
+      incBtn.addEventListener('click', (e)=>{ e.stopPropagation(); dev = clamp(dev + 0.02, 0, 0.3); devLabel.textContent = `Lvl:${percent(dev)}`; regenerate(); });
+      decBtn.addEventListener('click', (e)=>{ e.stopPropagation(); dev = clamp(dev - 0.02, 0, 0.3); devLabel.textContent = `Lvl:${percent(dev)}`; regenerate(); });
+      devRow.appendChild(decBtn); devRow.appendChild(devLabel); devRow.appendChild(incBtn);
+      panel.appendChild(devRow);
+
+      function render(){ gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); const pointSize = Math.min(canvas.width, canvas.height) * 0.7; gl.uniform1f(uPointSize, pointSize / planetEdge); const phase = Math.sin(orbitProgress); const frontness = -phase; const depthFactor = 0.925 + 0.075 * frontness; const lightZ = frontness; const starPos = (orbitSpeed !== 0) ? [ -Math.cos(orbitProgress) * dirScale, -Math.sin(orbitProgress) * dirScale * 0.5 ] : [ Number.isFinite(sx) ? sx : -0.7, Number.isFinite(sy) ? sy : 0 ]; gl.uniform2fv(uStarPosition, new Float32Array(starPos)); gl.uniform2fv(uPlanetPosition, new Float32Array([0,0])); gl.uniform1f(uRotationOffset, rotationOffset); gl.uniform1f(uDepthFactor, depthFactor); gl.uniform1f(uLightZ, lightZ); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, textureGL); gl.uniform1i(uTexture, 0); const hasCity = !!cityMaskGL; gl.uniform1i(uHasCityMask, hasCity ? 1 : 0); if (hasCity) { gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, cityMaskGL); gl.uniform1i(uCityMask, 1); gl.uniform3fv(uCityColor, new Float32Array([1.0,0.85,0.6])); gl.uniform3fv(uCityDayColor, new Float32Array([0.75,0.75,0.78])); gl.uniform1f(uCityIntensity, cityIntensity); gl.uniform1f(uCityDayIntensity, cityDayIntensity); } gl.drawArrays(gl.POINTS, 0, 1); }
+
+      function tick(now){ const dt = (now - lastTime)/1000; lastTime = now; const hoursDelta = (dt * sim) / Math.max(0.00000001, secPerHour); totalHours += hoursDelta; rotationOffset = dayLength ? ((totalHours / dayLength) % 1) : rotationOffset; orbitProgress = (orbitSpeed * totalHours); render(); updateDateLine(); requestAnimationFrame(tick); }
+
+      render(); requestAnimationFrame(tick);
+    </script>
+  </body>
+</html>
