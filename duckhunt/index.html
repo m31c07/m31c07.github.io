@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duck Hunt 8-bit</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            cursor: none;
+        }
+        
+        #gameCanvas {
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        
+        #score {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 24px;
+            color: white;
+            text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000;
+            z-index: 100;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Убито: 0</div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        
+        // Настройка canvas на весь экран
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        // Состояние игры
+        let score = 0;
+        let mouseX = canvas.width / 2;
+        let mouseY = canvas.height / 2;
+        let canAim = true; // Можно ли прицеливаться
+        let shotSnapshot = null; // Снапшот выстрела
+        let shotSnapshotTime = 0;
+        
+        // Утка
+        const duck = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            width: 50,
+            height: 40,
+            vx: 3,
+            vy: 2,
+            wingUp: true,
+            wingFrame: 0,
+            wingTimer: 0,
+            isDead: false,
+            deathY: 0
+        };
+        
+        // Прицеливание
+        const aim = {
+            isActive: false,
+            progress: 0,
+            aimTime: 5000, // 5 секунд
+            currentAimTime: 0,
+            cooldown: 500, // Кулдаун после промаха
+            cooldownStart: 0
+        };
+        
+        // Облака
+        const clouds = [];
+        for (let i = 0; i < 5; i++) {
+            clouds.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * (canvas.height / 3),
+                width: 60 + Math.random() * 40,
+                speed: 0.3 + Math.random() * 0.5
+            });
+        }
+        
+        // Отслеживание мыши
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+        
+        // Обработка клика - выстрел
+        document.addEventListener('click', (e) => {
+            if (!canAim || duck.isDead) return;
+            
+            const duckCenterX = duck.x + duck.width / 2;
+            const duckCenterY = duck.y + duck.height / 2;
+            
+            // Текущий размер красного квадрата (сжимается от 200 до 20)
+            const currentSize = 200 - (200 - 20) * aim.progress;
+            const halfSize = currentSize / 2;
+            
+            // Случайная точка внутри текущего красного квадрата
+            const shotX = duckCenterX - halfSize + Math.random() * currentSize;
+            const shotY = duckCenterY - halfSize + Math.random() * currentSize;
+            
+            // Проверка попадания в утку
+            const hitDuck = shotX >= duck.x && shotX <= duck.x + duck.width &&
+                           shotY >= duck.y && shotY <= duck.y + duck.height;
+            
+            if (hitDuck) {
+                // Попадание!
+                duck.isDead = true;
+                duck.deathY = duck.y;
+                score++;
+                scoreElement.textContent = `Убито: ${score}`;
+                aim.isActive = false;
+                aim.progress = 0;
+                aim.currentAimTime = 0;
+                createShotSnapshot(shotX, shotY);
+            } else {
+                // Промах - кулдаун
+                aim.isActive = false;
+                aim.progress = 0;
+                aim.currentAimTime = 0;
+                canAim = false;
+                aim.cooldownStart = Date.now();
+                createShotSnapshot(shotX, shotY);
+            }
+        });
+        
+        // Проверка попадания в хитбокс утки (радиус 100px от центра)
+        function checkAimZone() {
+            const duckCenterX = duck.x + duck.width / 2;
+            const duckCenterY = duck.y + duck.height / 2;
+            const dx = mouseX - duckCenterX;
+            const dy = mouseY - duckCenterY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            return distance <= 100;
+        }
+        
+        // Создание снапшота выстрела
+        function createShotSnapshot(shotX, shotY) {
+            const duckCenterX = duck.x + duck.width / 2;
+            const duckCenterY = duck.y + duck.height / 2;
+            const snapshotSize = 200;
+            
+            // Создаём offscreen canvas для снапшота
+            const snapshotCanvas = document.createElement('canvas');
+            snapshotCanvas.width = snapshotSize;
+            snapshotCanvas.height = snapshotSize;
+            const snapshotCtx = snapshotCanvas.getContext('2d');
+            
+            // Рисуем фон (градиент)
+            const gradient = snapshotCtx.createLinearGradient(0, 0, 0, snapshotSize);
+            gradient.addColorStop(0, '#1E90FF');
+            gradient.addColorStop(0.5, '#87CEEB');
+            gradient.addColorStop(1, '#98FB98');
+            snapshotCtx.fillStyle = gradient;
+            snapshotCtx.fillRect(0, 0, snapshotSize, snapshotSize);
+            
+            // Рисуем утку (копию текущей)
+            const duckLocalX = duck.x - (duckCenterX - 100);
+            const duckLocalY = duck.y - (duckCenterY - 100);
+            
+            if (duck.isDead) {
+                // Падающая утка
+                snapshotCtx.fillStyle = '#8B4513';
+                snapshotCtx.fillRect(duckLocalX, duckLocalY, duck.width, duck.height);
+                snapshotCtx.fillStyle = '#000';
+                snapshotCtx.fillRect(duckLocalX + duck.width - 12, duckLocalY + 8, 8, 2);
+            } else {
+                // Тело
+                snapshotCtx.fillStyle = '#D2691E';
+                snapshotCtx.fillRect(duckLocalX + 10, duckLocalY + 15, duck.width - 20, duck.height - 15);
+                // Голова
+                snapshotCtx.fillStyle = '#228B22';
+                snapshotCtx.fillRect(duckLocalX + duck.width - 20, duckLocalY + 5, 18, 18);
+                // Глаз
+                snapshotCtx.fillStyle = '#FFF';
+                snapshotCtx.fillRect(duckLocalX + duck.width - 12, duckLocalY + 8, 6, 6);
+                snapshotCtx.fillStyle = '#000';
+                snapshotCtx.fillRect(duckLocalX + duck.width - 10, duckLocalY + 10, 3, 3);
+                // Клюв
+                snapshotCtx.fillStyle = '#FFD700';
+                snapshotCtx.fillRect(duckLocalX + duck.width - 4, duckLocalY + 12, 8, 6);
+                // Крылья
+                snapshotCtx.fillStyle = '#8B4513';
+                if (duck.wingUp) {
+                    snapshotCtx.fillRect(duckLocalX + 15, duckLocalY, 20, 18);
+                } else {
+                    snapshotCtx.fillRect(duckLocalX + 15, duckLocalY + 12, 20, 18);
+                }
+                // Хвост
+                snapshotCtx.fillStyle = '#A0522D';
+                snapshotCtx.fillRect(duckLocalX + 8, duckLocalY + 18, 8, 10);
+            }
+            
+            // Делаем черно-белым
+            const imageData = snapshotCtx.getImageData(0, 0, snapshotSize, snapshotSize);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                data[i] = avg;
+                data[i + 1] = avg;
+                data[i + 2] = avg;
+            }
+            snapshotCtx.putImageData(imageData, 0, 0);
+            
+            // Рисуем точку выстрела на снапшоте
+            const localShotX = shotX - (duckCenterX - 100);
+            const localShotY = shotY - (duckCenterY - 100);
+            snapshotCtx.fillStyle = '#000';
+            snapshotCtx.fillRect(localShotX - 1.5, localShotY - 1.5, 3, 3);
+            
+            shotSnapshot = {
+                canvas: snapshotCanvas,
+                x: duckCenterX - 100,
+                y: duckCenterY - 100,
+                startY: duckCenterY - 100
+            };
+            shotSnapshotTime = Date.now();
+        }
+        
+        // Отрисовка пиксельной утки
+        function drawDuck() {
+            if (duck.isDead) {
+                // Падающая утка
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(duck.x, duck.y, duck.width, duck.height);
+                // Закрытый глаз
+                ctx.fillStyle = '#000';
+                ctx.fillRect(duck.x + duck.width - 12, duck.y + 8, 8, 2);
+                return;
+            }
+            
+            const x = duck.x;
+            const y = duck.y;
+            const w = duck.width;
+            const h = duck.height;
+            
+            // Тело (оранжево-коричневое)
+            ctx.fillStyle = '#D2691E';
+            ctx.fillRect(x + 10, y + 15, w - 20, h - 15);
+            
+            // Голова (зеленая как у селезня)
+            ctx.fillStyle = '#228B22';
+            ctx.fillRect(x + w - 20, y + 5, 18, 18);
+            
+            // Глаз (белый с черной точкой)
+            ctx.fillStyle = '#FFF';
+            ctx.fillRect(x + w - 12, y + 8, 6, 6);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(x + w - 10, y + 10, 3, 3);
+            
+            // Клюв (желтый)
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(x + w - 4, y + 12, 8, 6);
+            
+            // Крылья (анимированные)
+            ctx.fillStyle = '#8B4513';
+            if (duck.wingUp) {
+                // Крыло вверх
+                ctx.fillRect(x + 15, y, 20, 18);
+            } else {
+                // Крыло вниз
+                ctx.fillRect(x + 15, y + 12, 20, 18);
+            }
+            
+            // Хвост
+            ctx.fillStyle = '#A0522D';
+            ctx.fillRect(x + 8, y + 18, 8, 10);
+        }
+        
+        // Отрисовка облаков
+        function drawClouds() {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            clouds.forEach(cloud => {
+                // Пиксельное облако из нескольких прямоугольников
+                ctx.fillRect(cloud.x, cloud.y, cloud.width, 20);
+                ctx.fillRect(cloud.x + 10, cloud.y - 10, cloud.width - 20, 15);
+                ctx.fillRect(cloud.x + 20, cloud.y - 15, cloud.width - 40, 12);
+            });
+        }
+        
+        // Отрисовка снапшота выстрела
+        function drawShotSnapshot() {
+            if (!shotSnapshot) return;
+            
+            const elapsed = Date.now() - shotSnapshotTime;
+            const duration = 2000;
+            
+            if (elapsed >= duration) {
+                shotSnapshot = null;
+                return;
+            }
+            
+            const progress = elapsed / duration;
+            const alpha = 1 - progress;
+            const yOffset = progress * 100; // Поднимается на 100px
+            
+            const photoX = shotSnapshot.x;
+            const photoY = shotSnapshot.startY - yOffset;
+            const photoSize = 200;
+            const borderSize = 10;
+            const bottomBorder = 50; // Утолщённая нижняя рамка
+            
+            // Белая рамка Polaroid
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#FFF';
+            ctx.fillRect(
+                photoX - borderSize,
+                photoY - borderSize,
+                photoSize + borderSize * 2,
+                photoSize + borderSize + bottomBorder
+            );
+            
+            // Само фото
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(shotSnapshot.canvas, photoX, photoY);
+            ctx.restore();
+        }
+        
+        // Отрисовка прицела
+        function drawAim() {
+            if (!aim.isActive) return;
+            
+            const duckCenterX = duck.x + duck.width / 2;
+            const duckCenterY = duck.y + duck.height / 2;
+            const size = 200; // 100px радиус = 200px квадрат
+            
+            // Рисуем внешний квадрат зоны прицеливания (всегда 200x200)
+            ctx.strokeStyle = '#FFFF00';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(duckCenterX - 100, duckCenterY - 100, size, size);
+            
+            // Заполнение зоны прицеливания
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.1)';
+            ctx.fillRect(duckCenterX - 100, duckCenterY - 100, size, size);
+            
+            // Индикатор прогресса (сжимается от 200 до 20 пикселей)
+            const currentSize = 200 - (200 - 20) * aim.progress;
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(
+                duckCenterX - currentSize / 2,
+                duckCenterY - currentSize / 2,
+                currentSize,
+                currentSize
+            );
+        }
+        
+        // Отрисовка индикатора кулдауна
+        function drawCooldown() {
+            if (canAim) return;
+            
+            const elapsed = Date.now() - aim.cooldownStart;
+            const remaining = Math.max(0, aim.cooldown - elapsed);
+            
+            if (remaining > 0) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                ctx.fillRect(mouseX - 15, mouseY - 15, 30, 30);
+                ctx.fillStyle = '#FFF';
+                ctx.font = '12px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(Math.ceil(remaining / 100), mouseX, mouseY + 4);
+            }
+        }
+        
+        // Отрисовка курсора-прицела
+        function drawCursor() {
+            const size = 20;
+            const half = size / 2;
+            
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 2;
+            
+            // Перекрестие
+            ctx.beginPath();
+            ctx.moveTo(mouseX - half - 5, mouseY);
+            ctx.lineTo(mouseX - 2, mouseY);
+            ctx.moveTo(mouseX + 2, mouseY);
+            ctx.lineTo(mouseX + half + 5, mouseY);
+            ctx.moveTo(mouseX, mouseY - half - 5);
+            ctx.lineTo(mouseX, mouseY - 2);
+            ctx.moveTo(mouseX, mouseY + 2);
+            ctx.lineTo(mouseX, mouseY + half + 5);
+            ctx.stroke();
+            
+            // Точка в центре
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(mouseX - 2, mouseY - 2, 4, 4);
+        }
+        
+        // Отрисовка фона (градиент неба)
+        function drawBackground() {
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#1E90FF');
+            gradient.addColorStop(0.5, '#87CEEB');
+            gradient.addColorStop(1, '#98FB98');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Земля (трава внизу)
+            ctx.fillStyle = '#228B22';
+            ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+            
+            // Пиксельная трава
+            ctx.fillStyle = '#32CD32';
+            for (let i = 0; i < canvas.width; i += 10) {
+                ctx.fillRect(i, canvas.height - 50, 4, 10);
+                ctx.fillRect(i + 5, canvas.height - 55, 4, 8);
+            }
+        }
+        
+        // Обновление логики утки
+        function updateDuck(deltaTime) {
+            if (duck.isDead) {
+                duck.y += 8; // Падение
+                if (duck.y > canvas.height) {
+                    // Респавн новой утки
+                    respawnDuck();
+                }
+                return;
+            }
+            
+            // Движение утки
+            duck.x += duck.vx;
+            duck.y += duck.vy;
+            
+            // Отскок от стен
+            if (duck.x <= 0 || duck.x + duck.width >= canvas.width - 100) {
+                duck.vx = -duck.vx;
+            }
+            if (duck.y <= 50 || duck.y + duck.height >= canvas.height - 100) {
+                duck.vy = -duck.vy;
+            }
+            
+            // Анимация крыльев
+            duck.wingTimer += deltaTime;
+            if (duck.wingTimer > 150) {
+                duck.wingUp = !duck.wingUp;
+                duck.wingTimer = 0;
+            }
+            
+            // Случайное изменение направления
+            if (Math.random() < 0.01) {
+                duck.vy = (Math.random() - 0.5) * 8;
+            }
+            if (Math.random() < 0.01) {
+                duck.vx = (Math.random() - 0.5) * 8;
+                // Ограничение скорости
+                if (Math.abs(duck.vx) < 2) duck.vx = duck.vx > 0 ? 2 : -2;
+            }
+        }
+        
+        // Респавн утки
+        function respawnDuck() {
+            duck.isDead = false;
+            duck.x = 100 + Math.random() * (canvas.width - 300);
+            duck.y = 100 + Math.random() * (canvas.height / 2);
+            duck.vx = (Math.random() - 0.5) * 8;
+            duck.vy = (Math.random() - 0.5) * 6;
+            if (Math.abs(duck.vx) < 2) duck.vx = 3;
+            if (Math.abs(duck.vy) < 2) duck.vy = 3;
+            aim.isActive = false;
+            aim.progress = 0;
+            aim.currentAimTime = 0;
+        }
+        
+        // Обновление облаков
+        function updateClouds() {
+            clouds.forEach(cloud => {
+                cloud.x += cloud.speed;
+                if (cloud.x > canvas.width) {
+                    cloud.x = -cloud.width;
+                    cloud.y = Math.random() * (canvas.height / 3);
+                }
+            });
+        }
+        
+        // Игровой цикл
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            
+            // Очистка
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Обновление
+            updateClouds();
+            updateDuck(deltaTime);
+            
+            // Проверка прицеливания
+            const inAimZone = checkAimZone();
+            
+            // Проверка окончания кулдауна
+            if (!canAim) {
+                const elapsed = Date.now() - aim.cooldownStart;
+                if (elapsed >= aim.cooldown) {
+                    canAim = true;
+                }
+            }
+            
+            if (inAimZone && !duck.isDead && canAim) {
+                if (!aim.isActive) {
+                    aim.isActive = true;
+                    aim.currentAimTime = 0;
+                }
+                aim.currentAimTime += deltaTime;
+                aim.progress = Math.min(aim.currentAimTime / aim.aimTime, 1);
+            } else {
+                // Сброс прицеливания
+                aim.isActive = false;
+                aim.progress = 0;
+                aim.currentAimTime = 0;
+            }
+            
+            // Отрисовка
+            drawBackground();
+            drawClouds();
+            drawDuck();
+            drawAim();
+            drawCursor();
+            drawCooldown();
+            drawShotSnapshot();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Старт игры
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
