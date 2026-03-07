@@ -745,8 +745,8 @@
                 }
             }
 
-            // Прицеливание активно если: мышь в зоне ИЛИ палец удерживается на экране (и не пауза)
-            const aimInputActive = !isPaused && (isTouching || inAimZone);
+            // Прицеливание активно если: курсор/палец в зоне прицеливания (и не пауза)
+            const aimInputActive = !isPaused && inAimZone;
 
             if (aimInputActive && !duck.isDead && canAim) {
                 if (!aim.isActive) {
