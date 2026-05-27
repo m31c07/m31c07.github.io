@@ -899,8 +899,9 @@
         
         // Отрисовка прицела
         function drawAim() {
-            if (!aim.isActive) return;
+            if (!aim.isActive || !aim.targetDuck) return;
             
+            const duck = aim.targetDuck;
             const duckCenterX = duck.x + duck.width / 2;
             const duckCenterY = duck.y + duck.height / 2;
             const size = 200; // 100px радиус = 200px квадрат
