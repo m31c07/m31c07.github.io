@@ -814,10 +814,13 @@
 
             // При попадании - рисуем приготовленную утку, которая падает
             if (shotSnapshot.isHit) {
+                const hitDuck = ducks.find(d => d.id === shotSnapshot.duckId);
+                if (!hitDuck) return;
+                
                 const duckX = shotSnapshot.x;
                 const duckY = shotSnapshot.y + progress * 400; // Падение вниз на 400px
-                const duckW = duck.width;
-                const duckH = duck.height;
+                const duckW = hitDuck.width;
+                const duckH = hitDuck.height;
 
                 ctx.save();
                 ctx.globalAlpha = alpha;
