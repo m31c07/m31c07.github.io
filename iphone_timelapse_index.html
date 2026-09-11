@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Оконный таймлапс</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#111; color:#eee; min-height:100vh; }
+    main { max-width:760px; margin:0 auto; padding:16px; }
+    h1 { font-size:22px; margin:0 0 12px; }
+    .preview { position:relative; background:#000; border-radius:14px; overflow:hidden; aspect-ratio:16/9; }
+    video { width:100%; height:100%; object-fit:cover; display:block; }
+    .badge { position:absolute; left:10px; bottom:10px; padding:5px 8px; border-radius:8px; background:rgba(0,0,0,.65); font-size:13px; }
+    .panel { margin-top:12px; padding:14px; border-radius:14px; background:#1c1c1e; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    label { display:block; font-size:13px; color:#aaa; }
+    select,input[type=range] { width:100%; margin-top:6px; }
+    select,button { font:inherit; }
+    select { padding:10px; border-radius:10px; border:1px solid #3a3a3c; background:#2c2c2e; color:#fff; }
+    .value { color:#fff; font-weight:600; }
+    .buttons { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+    button { border:0; border-radius:11px; padding:12px 10px; font-weight:700; background:#0a84ff; color:white; }
+    button.secondary { background:#3a3a3c; }
+    button.danger { background:#5a1d20; }
+    button:disabled { opacity:.45; }
+    .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px 12px; font-size:14px; }
+    .stats div:nth-child(odd) { color:#aaa; }
+    .days { margin-top:10px; }
+    .day { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center; padding:9px 0; border-top:1px solid #333; font-size:14px; }
+    .day button { padding:8px 10px; font-size:13px; }
+    .note { font-size:13px; line-height:1.4; color:#aaa; margin-top:10px; }
+    .ok { color:#30d158; } .warn { color:#ff9f0a; } .err { color:#ff453a; }
+    @media (max-width:520px) {
+      .grid,.buttons { grid-template-columns:1fr; }
+      main { padding:10px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Оконный таймлапс</h1>
+
+  <div class="preview">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="liveBadge" class="badge">камера не запущена</div>
+  </div>
+
+  <div class="panel">
+    <div class="grid">
+      <label>Интервал
+        <select id="interval">
+          <option value="10">10 секунд</option>
+          <option value="30">30 секунд</option>
+          <option value="60" selected>1 минута</option>
+          <option value="120">2 минуты</option>
+          <option value="300">5 минут</option>
+        </select>
+      </label>
+
+      <label>Разрешение
+        <select id="resolution">
+          <option value="1280x720">1280×720</option>
+          <option value="1920x1080" selected>1920×1080</option>
+          <option value="2592x1458">2592×1458</option>
+        </select>
+      </label>
+
+      <label>JPEG: <span class="value" id="qualityValue">75%</span>
+        <input id="quality" type="range" min="40" max="95" value="75">
+      </label>
+
+      <label>Камера
+        <select id="facing">
+          <option value="environment" selected>задняя</option>
+          <option value="user">передняя</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="buttons">
+      <button id="start">НАЧАТЬ</button>
+      <button id="stop" class="secondary" disabled>ОСТАНОВИТЬ</button>
+    </div>
+
+    <div class="note">
+      На iOS 15 экран лучше не блокировать: Safari может остановить камеру/таймеры в фоне.
+      Для долгой съёмки поставь iPhone на зарядку и отключи автоблокировку экрана.
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="stats">
+      <div>Статус</div><div id="status">готов</div>
+      <div>Всего кадров</div><div id="count">0</div>
+      <div>Занято кадрами</div><div id="used">0 Б</div>
+      <div>Оценка хранилища</div><div id="quota">—</div>
+      <div>Последний кадр</div><div id="last">—</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <strong>Архив по дням</strong>
+    <div id="days" class="days"></div>
+    <div class="buttons">
+      <button id="exportAll" class="secondary">Скачать всё ZIP</button>
+      <button id="deleteAll" class="danger">Удалить всё</button>
+    </div>
+    <div class="note">
+      ZIP создаётся прямо на телефоне без сервера. При очень большом архиве лучше выгружать отдельные дни.
+    </div>
+  </div>
+</main>
+
+<canvas id="canvas" hidden></canvas>
+
+<script>
+(() => {
+  'use strict';
+
+  const DB_NAME = 'window-timelapse';
+  const STORE = 'frames';
+  const DB_VERSION = 1;
+
+  const $ = id => document.getElementById(id);
+  const video = $('video'), canvas = $('canvas');
+  const intervalSel = $('interval'), resolutionSel = $('resolution'),
+        quality = $('quality'), qualityValue = $('qualityValue'),
+        facing = $('facing'), startBtn = $('start'), stopBtn = $('stop'),
+        statusEl = $('status'), countEl = $('count'), usedEl = $('used'),
+        quotaEl = $('quota'), lastEl = $('last'), daysEl = $('days'),
+        exportAllBtn = $('exportAll'), deleteAllBtn = $('deleteAll'),
+        liveBadge = $('liveBadge');
+
+  let db, stream = null, timer = null, running = false, nextAt = 0;
+
+  function setStatus(text, cls='') {
+    statusEl.textContent = text;
+    statusEl.className = cls;
+  }
+  function fmtBytes(n) {
+    if (!Number.isFinite(n)) return '—';
+    const u=['Б','КБ','МБ','ГБ','ТБ']; let i=0;
+    while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+    return (i ? n.toFixed(n<10?2:1) : Math.round(n)) + ' ' + u[i];
+  }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function dayKey(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function fileStamp(d){ return dayKey(d)+'_'+pad(d.getHours())+'-'+pad(d.getMinutes())+'-'+pad(d.getSeconds()); }
+
+  function openDB() {
+    return new Promise((resolve,reject)=>{
+      const r = indexedDB.open(DB_NAME, DB_VERSION);
+      r.onupgradeneeded = () => {
+        const d=r.result;
+        if (!d.objectStoreNames.contains(STORE)) {
+          const s=d.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});
+          s.createIndex('day','day',{unique:false});
+          s.createIndex('ts','ts',{unique:false});
+        }
+      };
+      r.onsuccess=()=>resolve(r.result);
+      r.onerror=()=>reject(r.error);
+    });
+  }
+
+  function txDone(tx){
+    return new Promise((resolve,reject)=>{
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>reject(tx.error);
+      tx.onabort=()=>reject(tx.error || new Error('Transaction aborted'));
+    });
+  }
+
+  async function putFrame(frame) {
+    const tx=db.transaction(STORE,'readwrite');
+    tx.objectStore(STORE).add(frame);
+    await txDone(tx);
+  }
+
+  async function getAllFrames(day=null) {
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction(STORE,'readonly');
+      const s=tx.objectStore(STORE);
+      const req = day ? s.index('day').getAll(IDBKeyRange.only(day)) : s.getAll();
+      req.onsuccess=()=>resolve(req.result.sort((a,b)=>a.ts-b.ts));
+      req.onerror=()=>reject(req.error);
+    });
+  }
+
+  async function deleteDay(day) {
+    const tx=db.transaction(STORE,'readwrite');
+    const idx=tx.objectStore(STORE).index('day');
+    const req=idx.openKeyCursor(IDBKeyRange.only(day));
+    req.onsuccess=()=>{
+      const c=req.result;
+      if(c){ tx.objectStore(STORE).delete(c.primaryKey); c.continue(); }
+    };
+    await txDone(tx);
+  }
+
+  async function clearAll() {
+    const tx=db.transaction(STORE,'readwrite');
+    tx.objectStore(STORE).clear();
+    await txDone(tx);
+  }
+
+  async function startCamera() {
+    stopCamera();
+    const [w,h] = resolutionSel.value.split('x').map(Number);
+    const constraints = {
+      audio:false,
+      video:{
+        facingMode:{ideal:facing.value},
+        width:{ideal:w},
+        height:{ideal:h}
+      }
+    };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    await video.play();
+    await new Promise(resolve=>{
+      if(video.readyState >= 2) return resolve();
+      video.onloadedmetadata=()=>resolve();
+    });
+    liveBadge.textContent = `${video.videoWidth}×${video.videoHeight}`;
+  }
+
+  function stopCamera() {
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    stream=null;
+    video.srcObject=null;
+    liveBadge.textContent='камера не запущена';
+  }
+
+  function toBlob(canvas, type, quality) {
+    return new Promise((resolve,reject)=>{
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('JPEG encoding failed')), type, quality);
+    });
+  }
+
+  async function capture() {
+    if(!running || !stream) return;
+    try {
+      const [targetW,targetH] = resolutionSel.value.split('x').map(Number);
+      const srcW=video.videoWidth, srcH=video.videoHeight;
+      if(!srcW || !srcH) throw new Error('Камера ещё не готова');
+
+      // crop to requested aspect ratio without stretching
+      const targetAR=targetW/targetH, srcAR=srcW/srcH;
+      let sx=0, sy=0, sw=srcW, sh=srcH;
+      if(srcAR > targetAR){ sw=srcH*targetAR; sx=(srcW-sw)/2; }
+      else { sh=srcW/targetAR; sy=(srcH-sh)/2; }
+
+      canvas.width=targetW; canvas.height=targetH;
+      const ctx=canvas.getContext('2d',{alpha:false});
+      ctx.drawImage(video,sx,sy,sw,sh,0,0,targetW,targetH);
+
+      const now=new Date();
+      const blob=await toBlob(canvas,'image/jpeg',Number(quality.value)/100);
+      await putFrame({
+        ts:now.getTime(),
+        day:dayKey(now),
+        name:fileStamp(now)+'.jpg',
+        size:blob.size,
+        blob
+      });
+      lastEl.textContent=now.toLocaleString();
+      setStatus('съёмка идёт','ok');
+      await refreshStats();
+    } catch(e) {
+      console.error(e);
+      setStatus('ошибка кадра: '+e.message,'err');
+    }
+  }
+
+  function scheduleLoop() {
+    clearTimeout(timer);
+    const period=Number(intervalSel.value)*1000;
+    const loop=async()=>{
+      if(!running) return;
+      await capture();
+      nextAt += period;
+      const delay=Math.max(100, nextAt-Date.now());
+      timer=setTimeout(loop,delay);
+    };
+    nextAt=Date.now();
+    loop();
+  }
+
+  async function start() {
+    if(running) return;
+    try {
+      setStatus('запускаю камеру…');
+      await startCamera();
+      running=true;
+      startBtn.disabled=true; stopBtn.disabled=false;
+      resolutionSel.disabled=true; facing.disabled=true;
+      scheduleLoop();
+    } catch(e) {
+      console.error(e);
+      setStatus('не удалось открыть камеру: '+e.message,'err');
+      stopCamera();
+    }
+  }
+
+  function stop() {
+    running=false;
+    clearTimeout(timer); timer=null;
+    stopCamera();
+    startBtn.disabled=false; stopBtn.disabled=true;
+    resolutionSel.disabled=false; facing.disabled=false;
+    setStatus('остановлено','warn');
+  }
+
+  async function refreshStats() {
+    const frames=await getAllFrames();
+    const bytes=frames.reduce((s,f)=>s+(f.size||f.blob?.size||0),0);
+    countEl.textContent=String(frames.length);
+    usedEl.textContent=fmtBytes(bytes);
+
+    const byDay=new Map();
+    for(const f of frames){
+      const x=byDay.get(f.day)||{count:0,bytes:0};
+      x.count++; x.bytes += f.size||f.blob?.size||0; byDay.set(f.day,x);
+    }
+    daysEl.innerHTML='';
+    const days=[...byDay.entries()].sort((a,b)=>b[0].localeCompare(a[0]));
+    if(!days.length) daysEl.innerHTML='<div class="note">Пока кадров нет.</div>';
+    for(const [day,v] of days){
+      const row=document.createElement('div'); row.className='day';
+      const info=document.createElement('div');
+      info.textContent=`${day} — ${v.count} кадров, ${fmtBytes(v.bytes)}`;
+      const exp=document.createElement('button'); exp.className='secondary'; exp.textContent='ZIP';
+      exp.onclick=()=>exportZip(day);
+      const del=document.createElement('button'); del.className='danger'; del.textContent='Удалить';
+      del.onclick=async()=>{ if(confirm(`Удалить все кадры за ${day}?`)){ await deleteDay(day); await refreshStats(); } };
+      row.append(info,exp,del); daysEl.append(row);
+    }
+
+    if(navigator.storage?.estimate){
+      try{
+        const e=await navigator.storage.estimate();
+        quotaEl.textContent = `${fmtBytes(e.usage||0)} / ${fmtBytes(e.quota||0)}`;
+      }catch(_){}
+    }
+  }
+
+  // Minimal ZIP writer, method=STORE (no compression). JPEGs are already compressed.
+  const crcTable = (() => {
+    const t = new Uint32Array(256);
+    for(let n=0;n<256;n++){
+      let c=n;
+      for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);
+      t[n]=c>>>0;
+    }
+    return t;
+  })();
+  function crc32(u8){
+    let c=0xFFFFFFFF;
+    for(let i=0;i<u8.length;i++) c=crcTable[(c^u8[i])&255]^(c>>>8);
+    return (c^0xFFFFFFFF)>>>0;
+  }
+  function u16(n){ return new Uint8Array([n&255,(n>>>8)&255]); }
+  function u32(n){ return new Uint8Array([n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]); }
+  function dosDateTime(ms){
+    const d=new Date(ms);
+    const time=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1);
+    const date=((Math.max(1980,d.getFullYear())-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+    return {time,date};
+  }
+  function concat(parts){
+    const len=parts.reduce((s,p)=>s+p.length,0), out=new Uint8Array(len);
+    let o=0; for(const p of parts){ out.set(p,o); o+=p.length; } return out;
+  }
+
+  async function buildZip(frames){
+    const enc=new TextEncoder(), locals=[], centrals=[]; let offset=0;
+    for(let i=0;i<frames.length;i++){
+      setStatus(`готовлю ZIP: ${i+1}/${frames.length}`);
+      await new Promise(r=>setTimeout(r,0));
+      const f=frames[i], name=enc.encode(f.name), data=new Uint8Array(await f.blob.arrayBuffer());
+      const crc=crc32(data), dt=dosDateTime(f.ts);
+      const local=concat([
+        u32(0x04034b50),u16(20),u16(0),u16(0),u16(dt.time),u16(dt.date),
+        u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),name,data
+      ]);
+      const central=concat([
+        u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(dt.time),u16(dt.date),
+        u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),u16(0),
+        u16(0),u16(0),u32(0),u32(offset),name
+      ]);
+      locals.push(local); centrals.push(central); offset += local.length;
+    }
+    const centralBlob=concat(centrals);
+    const end=concat([
+      u32(0x06054b50),u16(0),u16(0),u16(frames.length),u16(frames.length),
+      u32(centralBlob.length),u32(offset),u16(0)
+    ]);
+    return new Blob([...locals,centralBlob,end],{type:'application/zip'});
+  }
+
+  async function exportZip(day=null){
+    try{
+      const frames=await getAllFrames(day);
+      if(!frames.length){ alert('Нет кадров для экспорта.'); return; }
+      const blob=await buildZip(frames);
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=`timelapse_${day||'all'}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+      setStatus(running?'съёмка идёт':'готов','ok');
+    }catch(e){
+      console.error(e); setStatus('ошибка ZIP: '+e.message,'err');
+    }
+  }
+
+  quality.oninput=()=>qualityValue.textContent=quality.value+'%';
+  startBtn.onclick=start;
+  stopBtn.onclick=stop;
+  exportAllBtn.onclick=()=>exportZip(null);
+  deleteAllBtn.onclick=async()=>{
+    if(confirm('Удалить ВСЕ сохранённые кадры? Это необратимо.')){
+      await clearAll(); await refreshStats();
+    }
+  };
+
+  document.addEventListener('visibilitychange',()=>{
+    if(running && document.hidden) setStatus('страница ушла в фон — съёмка может остановиться','warn');
+    else if(running) setStatus('съёмка идёт','ok');
+  });
+
+  window.addEventListener('beforeunload',()=>stopCamera());
+
+  (async()=>{
+    try{
+      if(!navigator.mediaDevices?.getUserMedia) throw new Error('Этот браузер не поддерживает доступ к камере.');
+      db=await openDB();
+      await refreshStats();
+      setStatus('готов','ok');
+    }catch(e){
+      console.error(e); setStatus(e.message,'err'); startBtn.disabled=true;
+    }
+  })();
+})();
+</script>
+</body>
+</html>
